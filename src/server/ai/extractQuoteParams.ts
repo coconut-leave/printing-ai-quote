@@ -1,4 +1,5 @@
 import OpenAI from 'openai'
+import { requireOpenAIKey } from '@/server/config/env'
 
 export type ExtractedQuoteParams = {
   productType?: string
@@ -13,10 +14,20 @@ export type ExtractedQuoteParams = {
   paperType?: string
   paperWeight?: number
   printSides?: string
+  finishType?: string
+  lamination?: string
   missingFields: string[]
 }
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+let cachedOpenAIClient: OpenAI | null = null
+
+function getOpenAIClient(): OpenAI {
+  if (!cachedOpenAIClient) {
+    const apiKey = requireOpenAIKey()
+    cachedOpenAIClient = new OpenAI({ apiKey })
+  }
+  return cachedOpenAIClient
+}
 
 // ============ 中文术语映射表 ============
 const PRODUCT_TYPE_MAP: Record<string, string> = {
@@ -31,6 +42,8 @@ const PRODUCT_TYPE_MAP: Record<string, string> = {
   '名片': 'business_card',
   '贺卡': 'business_card',
   '海报': 'poster',
+  '招贴': 'poster',
+  '宣传画': 'poster',
   '贴纸': 'sticker',
   '纸袋': 'paper_bag',
   '牛皮纸袋': 'paper_bag',
@@ -77,6 +90,8 @@ function extractQuantityByRegex(text: string): number | undefined {
     /(\d+)\s*本(?![a-z])/gi,
     /(\d+)\s*份/gi,
     /(\d+)\s*个(?![^0-9])/gi,
+    /(\d+)\s*张/gi,
+    /(\d+)\s*幅/gi,
     /(\d+)\s*套/gi,
     /(\d+)\s*条/gi,
     /数量\s*[:：]\s*(\d+)/gi,
@@ -155,8 +170,8 @@ function extractPrintSidesByRegex(text: string): string | undefined {
 function extractWeightByRegex(text: string, keyword: string): number | undefined {
   // 匹配 "200g克", "200g", "157克" 等，关键词可能是 "封面", "内页", "纸张"
   const patterns = [
-    new RegExp(`${keyword}\\s*(\\d+)\\s*[克g]`, 'gi'),
-    /(\d+)\s*[克g](?=[,，。\s]|$)/gi,
+    new RegExp(`(?:${keyword})\\s*(\\d+)\\s*[克gG]`, 'gi'),
+    /(\d+)\s*[克gG](?=[^0-9]|$)/gi,
   ]
 
   for (const pattern of patterns) {
@@ -169,6 +184,15 @@ function extractWeightByRegex(text: string, keyword: string): number | undefined
     }
   }
 
+  return undefined
+}
+
+function extractPaperTypeByPosition(text: string, keyword: string): string | undefined {
+  const segmentPattern = new RegExp(`(?:${keyword})[^,，。；;\n]{0,20}`, 'gi')
+  const match = text.match(segmentPattern)
+  if (match && match[0]) {
+    return mapChineseTerm(match[0], PAPER_TYPE_MAP)
+  }
   return undefined
 }
 
@@ -204,7 +228,20 @@ const productionFields = [
   'innerWeight',
   'bindingType',
   'pageCount',
+  'paperType',
+  'paperWeight',
+  'printSides',
+  'lamination',
 ]
+
+const LAMINATION_MAP: Record<string, string> = {
+  '不覆膜': 'none',
+  '无覆膜': 'none',
+  '光膜': 'glossy',
+  '亮膜': 'glossy',
+  '哑膜': 'matte',
+  '磨砂膜': 'matte',
+}
 
 // ============ 混合抽取函数 ============
 
@@ -256,11 +293,19 @@ function applyRegexFallback(userText: string, llmResult: any): any {
     }
   }
 
+  if (enhanced.productType === 'poster' && !enhanced.lamination) {
+    const laminationByMap = mapChineseTerm(userText, LAMINATION_MAP)
+    if (laminationByMap) {
+      enhanced.lamination = laminationByMap
+    }
+  }
+
   // 补充纸张和克重
   if (enhanced.productType === 'album') {
     // 补充封面纸张
     if (!enhanced.coverPaper) {
-      const coverPaperByMap = mapChineseTerm(userText, PAPER_TYPE_MAP)
+      const coverPaperByMap =
+        extractPaperTypeByPosition(userText, '封面') || mapChineseTerm(userText, PAPER_TYPE_MAP)
       if (coverPaperByMap) {
         enhanced.coverPaper = coverPaperByMap
       }
@@ -276,7 +321,8 @@ function applyRegexFallback(userText: string, llmResult: any): any {
 
     // 补充内页纸张
     if (!enhanced.innerPaper) {
-      const innerPaperByMap = mapChineseTerm(userText, PAPER_TYPE_MAP)
+      const innerPaperByMap =
+        extractPaperTypeByPosition(userText, '内页|正文') || mapChineseTerm(userText, PAPER_TYPE_MAP)
       if (innerPaperByMap) {
         enhanced.innerPaper = innerPaperByMap
       }
@@ -284,7 +330,7 @@ function applyRegexFallback(userText: string, llmResult: any): any {
 
     // 补充内页克重
     if (!enhanced.innerWeight) {
-      const innerWeightByRegex = extractWeightByRegex(userText, '内页|内页|正文')
+      const innerWeightByRegex = extractWeightByRegex(userText, '内页|正文')
       if (innerWeightByRegex) {
         enhanced.innerWeight = innerWeightByRegex
       }
@@ -297,7 +343,7 @@ function applyRegexFallback(userText: string, llmResult: any): any {
         enhanced.bindingType = bindingByMap
       }
     }
-  } else if (enhanced.productType === 'flyer') {
+  } else if (enhanced.productType === 'flyer' || enhanced.productType === 'business_card' || enhanced.productType === 'poster') {
     // 补充纸张
     if (!enhanced.paperType) {
       const paperTypeByMap = mapChineseTerm(userText, PAPER_TYPE_MAP)
@@ -308,7 +354,7 @@ function applyRegexFallback(userText: string, llmResult: any): any {
 
     // 补充纸张克重
     if (!enhanced.paperWeight) {
-      const paperWeightByRegex = extractWeightByRegex(userText, '纸张|克|g')
+      const paperWeightByRegex = extractWeightByRegex(userText, '纸张|用纸|材质')
       if (paperWeightByRegex) {
         enhanced.paperWeight = paperWeightByRegex
       }
@@ -328,6 +374,20 @@ function computeMissingFields(params: any, productType: string): string[] {
         missing.push(field)
       }
     })
+  } else if (productType === 'business_card') {
+    const required = ['finishedSize', 'quantity', 'paperType', 'paperWeight', 'printSides']
+    required.forEach(field => {
+      if (!params[field]) {
+        missing.push(field)
+      }
+    })
+  } else if (productType === 'poster') {
+    const required = ['finishedSize', 'quantity', 'paperType', 'paperWeight']
+    required.forEach(field => {
+      if (!params[field]) {
+        missing.push(field)
+      }
+    })
   } else {
     // album
     const required = ['finishedSize', 'quantity', 'coverPaper', 'coverWeight', 'innerPaper', 'innerWeight', 'bindingType']
@@ -342,16 +402,46 @@ function computeMissingFields(params: any, productType: string): string[] {
 }
 
 export async function extractQuoteParams(userText: string): Promise<ExtractedQuoteParams> {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is not set')
+  // 首先尝试用正则表达式完全提取参数（降级策略）
+  const regexOnlyResult = extractParamsByRegexOnly(userText)
+  if (regexOnlyResult && regexOnlyResult.missingFields.length === 0) {
+    // 如果正则表达式能完全提取所有参数，直接返回
+    return regexOnlyResult
   }
 
+  // 仅在需要调用 OpenAI 时才校验 API Key。
+  requireOpenAIKey()
+
+  // 尝试调用 OpenAI API，最多重试 2 次
+  let lastError: Error | null = null
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const result = await callOpenAIWithTimeout(userText)
+      return result
+    } catch (err) {
+      lastError = err as Error
+      if (attempt < 3) {
+        // 指数退避重试
+        const delay = Math.pow(2, attempt - 1) * 1000 // 1s, 2s
+        await new Promise(resolve => setTimeout(resolve, delay))
+      }
+    }
+  }
+
+  // 如果 OpenAI 完全失败，使用正则表达式结果
+  console.warn('OpenAI API failed after retries, falling back to regex extraction:', lastError?.message)
+  return regexOnlyResult || { missingFields: productionFields } as ExtractedQuoteParams
+}
+
+// 带超时的 OpenAI 调用
+async function callOpenAIWithTimeout(userText: string): Promise<ExtractedQuoteParams> {
+  const client = getOpenAIClient()
   const prompt = `Extract quote parameters from this user text and return ONLY valid JSON without any markdown, explanation, or additional text:
 "${userText}"
 
 Return JSON with exactly these fields:
 {
-  "productType": string (map "画册/album" to "album", "传单/flyer" to "flyer", default "album"),
+  "productType": string (map "画册/album" to "album", "传单/flyer" to "flyer", "名片/business card" to "business_card", "海报/poster" to "poster", default "album"),
   "finishedSize": string (map "A4" to "A4", "A3" to "A3", etc.),
   "quantity": number (extract number like 1000),
   "coverPaper": string (map "铜版纸" to "coated", "哑光纸" to "matte", "艺术纸" to "art", "标准纸" to "standard", for album only),
@@ -363,23 +453,32 @@ Return JSON with exactly these fields:
   "paperType": string (map "铜版纸" to "coated", "哑光纸" to "matte", "艺术纸" to "art", "标准纸" to "standard", for flyer only),
   "paperWeight": number (extract weight like 200, for flyer only),
   "printSides": string (map "单面" to "single", "双面" to "double", for flyer only),
+  "lamination": string (map "不覆膜" to "none", "光膜" to "glossy", "哑膜" to "matte", for poster only),
   "missingFields": array of strings listing fields that are null or empty
 }
 
 Rules:
 - Extract values from the text if available, use null if not mentioned
 - For flyer: paperType (not coverPaper), paperWeight (not coverWeight), printSides are the key fields
+- For poster: paperType, paperWeight are required; lamination is optional and can be null
 - For album: coverPaper, coverWeight, innerPaper, innerWeight, bindingType are key fields
 - Always return missingFields array with names of null/empty fields relative to detected productType
 - Do NOT calculate any prices
 - Do NOT include any explanation text
 - Return ONLY the JSON object`
 
-  const response = await client.responses.create({
+  // 创建带超时的 Promise
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error('OpenAI API timeout after 30 seconds')), 30000)
+  })
+
+  const apiPromise = client.responses.create({
     model: 'gpt-4o-mini',
     input: prompt,
     max_output_tokens: 400,
   })
+
+  const response = await Promise.race([apiPromise, timeoutPromise])
 
   let text: string | undefined
   try {
@@ -389,9 +488,7 @@ Rules:
     // fallback
   }
   if (!text) {
-    return {
-      missingFields: productionFields,
-    } as ExtractedQuoteParams
+    throw new Error('No response text from OpenAI')
   }
 
   // 增强解析逻辑：提取 JSON
@@ -413,10 +510,7 @@ Rules:
 
     parsed = JSON.parse(jsonText)
   } catch (err) {
-    // 软失败：返回所有字段缺失
-    return {
-      missingFields: productionFields,
-    } as ExtractedQuoteParams
+    throw new Error('Failed to parse OpenAI response as JSON')
   }
 
   let result: ExtractedQuoteParams = {
@@ -432,6 +526,7 @@ Rules:
     paperType: parsed.paperType ?? undefined,
     paperWeight: parsed.paperWeight != null ? Number(parsed.paperWeight) : undefined,
     printSides: parsed.printSides ?? undefined,
+    lamination: parsed.lamination ?? undefined,
     missingFields: [],
   }
 
@@ -447,4 +542,107 @@ Rules:
   result.missingFields = computeMissingFields(result, productType)
 
   return result
+}
+
+// ============ 纯正则表达式降级函数 ============
+
+function extractParamsByRegexOnly(userText: string): ExtractedQuoteParams | null {
+  /**
+   * 当 OpenAI API 完全不可用时，使用纯正则表达式提取参数
+   * 这是一个降级策略，提取能力有限，但能保证基本功能
+   */
+
+  const result: any = {
+    productType: 'album', // 默认值
+    missingFields: [],
+  }
+
+  // 提取产品类型
+  const productType = detectProductTypeByRegex(userText)
+  if (productType) {
+    result.productType = productType
+  }
+
+  // 提取尺寸
+  const size = extractSizeByRegex(userText)
+  if (size) {
+    result.finishedSize = size
+  }
+
+  // 提取数量
+  const quantity = extractQuantityByRegex(userText)
+  if (quantity) {
+    result.quantity = quantity
+  }
+
+  // 根据产品类型提取特定字段
+  if (result.productType === 'album') {
+    // 提取页数
+    const pageCount = extractPageCountByRegex(userText)
+    if (pageCount) {
+      result.pageCount = pageCount
+    }
+
+    // 提取封面纸张和克重
+    const coverPaper =
+      extractPaperTypeByPosition(userText, '封面') || mapChineseTerm(userText, PAPER_TYPE_MAP)
+    if (coverPaper) {
+      result.coverPaper = coverPaper
+    }
+    const coverWeight = extractWeightByRegex(userText, '封面')
+    if (coverWeight) {
+      result.coverWeight = coverWeight
+    }
+
+    // 提取内页纸张和克重
+    const innerPaper =
+      extractPaperTypeByPosition(userText, '内页|正文') || mapChineseTerm(userText, PAPER_TYPE_MAP)
+    if (innerPaper) {
+      result.innerPaper = innerPaper
+    }
+    const innerWeight = extractWeightByRegex(userText, '内页|正文')
+    if (innerWeight) {
+      result.innerWeight = innerWeight
+    }
+
+    // 提取装订方式
+    const bindingType = mapChineseTerm(userText, BINDING_TYPE_MAP)
+    if (bindingType) {
+      result.bindingType = bindingType
+    }
+  } else if (result.productType === 'flyer' || result.productType === 'business_card' || result.productType === 'poster') {
+    // 提取纸张类型和克重
+    const paperType = mapChineseTerm(userText, PAPER_TYPE_MAP)
+    if (paperType) {
+      result.paperType = paperType
+    }
+    const paperWeight = extractWeightByRegex(userText, '纸张|用纸|材质')
+    if (paperWeight) {
+      result.paperWeight = paperWeight
+    }
+
+    // 提取单双面
+    const printSides = extractPrintSidesByRegex(userText)
+    if (printSides) {
+      result.printSides = printSides
+    }
+
+    if (result.productType === 'poster') {
+      const lamination = mapChineseTerm(userText, LAMINATION_MAP)
+      if (lamination) {
+        result.lamination = lamination
+      }
+    }
+  }
+
+  // 计算缺失字段
+  const productTypeFinal = result.productType || 'album'
+  result.missingFields = computeMissingFields(result, productTypeFinal)
+
+  // 如果没有任何参数被提取，返回 null
+  const hasAnyParam = Object.keys(result).some(key =>
+    key !== 'productType' && key !== 'missingFields' && result[key] != null
+  )
+
+  return hasAnyParam ? result : null
 }

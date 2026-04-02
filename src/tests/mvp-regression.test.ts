@@ -11,6 +11,21 @@ const results: ModuleResult[] = []
 const testModules = [
   { name: '计价引擎测试', file: 'src/tests/pricing-engines.test.ts' },
   { name: '参数合并与检测测试', file: 'src/tests/parameter-merging.test.ts' },
+  { name: '人工接管请求校验回归测试', file: 'src/tests/handoff-request.test.ts' },
+  { name: 'Poster 闭环测试', file: 'src/tests/poster-flow.test.ts' },
+  { name: '统一报价策略四路径回归测试', file: 'src/tests/workflow-policy-regression.test.ts' },
+  { name: 'Intent 检测回归测试', file: 'src/tests/intent-detection.test.ts' },
+  { name: 'Intent 业务处理回归测试', file: 'src/tests/intent-handlers.test.ts' },
+  { name: '知识层与规则层边界回归测试', file: 'src/tests/flow-boundaries.test.ts' },
+  { name: '知识层 registry 回归测试', file: 'src/tests/knowledge-registry.test.ts' },
+  { name: '咨询命中与推荐转化追踪回归测试', file: 'src/tests/consultation-tracking.test.ts' },
+  { name: '咨询回复回归测试', file: 'src/tests/consultation-handler.test.ts' },
+  { name: '推荐方案接续报价回归测试', file: 'src/tests/recommendation-confirmation.test.ts' },
+  { name: '推荐方案 patch 回归测试', file: 'src/tests/recommended-patch.test.ts' },
+  { name: '首页推荐方案可视化回归测试', file: 'src/tests/home-demo-visualization.test.ts' },
+  { name: '咨询到推荐到报价正式回归测试', file: 'src/tests/consultation-recommendation-quote-regression.test.ts' },
+  { name: '推荐方案正式链路回归测试', file: 'src/tests/recommendation-flow-regression.test.ts' },
+  { name: 'Chat API 推荐方案接续报价回归测试', file: 'src/tests/chat-api-recommendation-flow.test.ts' },
 ]
 
 console.log('\n')

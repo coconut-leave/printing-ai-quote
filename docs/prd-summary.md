@@ -80,11 +80,13 @@ The system should:
 7. Platform integration must remain compliant and auditable
 
 ## MVP product categories
-Start only with:
+Current live scope in this repository:
 - brochure / album
 - flyer
 - business card
 - poster
+
+Planned for later MVP expansion, but not yet implemented in the current codebase:
 - sticker
 - standard paper bag
 

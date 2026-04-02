@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { formatParamsByProduct, getMissingFieldsChineseText } from '@/lib/catalog/helpers'
 
 type ConversationDetails = {
   id: number
@@ -31,14 +32,19 @@ type ConversationDetails = {
     resolved: boolean
     createdAt: string
   }>
+  reflections: Array<{
+    id: number
+    issueType: 'PARAM_MISSING' | 'PARAM_WRONG' | 'QUOTE_INACCURATE' | 'SHOULD_HANDOFF'
+    reflectionText: string
+    suggestionDraft: string
+    status: 'NEW' | 'REVIEWED' | 'APPROVED' | 'REJECTED'
+    createdAt: string
+  }>
 }
 
-function formatParams(params: any): string {
+function formatParams(params: any, productType?: string): string {
   if (!params) return ''
-  const entries = Object.entries(params)
-    .filter(([, v]) => v !== null && v !== undefined && v !== '')
-    .map(([k, v]) => `${k}: ${v}`)
-  return entries.join(', ')
+  return formatParamsByProduct(productType, params)
 }
 
 function ParameterInfo({ message }: { message: any }) {
@@ -46,31 +52,32 @@ function ParameterInfo({ message }: { message: any }) {
   if (!metadata) return null
 
   const { extractedParams, mergedParams, quoteParams, missingFields } = metadata
+  const productType = quoteParams?.productType || mergedParams?.productType || extractedParams?.productType
 
   return (
     <div className='mt-3 space-y-2 rounded bg-slate-100 p-3 text-xs'>
       {extractedParams && Object.keys(extractedParams).length > 0 && (
         <div>
           <div className='font-semibold text-slate-700'>本轮抽取参数：</div>
-          <div className='text-slate-600'>{formatParams(extractedParams)}</div>
+          <div className='text-slate-600'>{formatParams(extractedParams, productType)}</div>
         </div>
       )}
       {missingFields && missingFields.length > 0 && (
         <div>
           <div className='font-semibold text-red-600'>缺失字段：</div>
-          <div className='text-red-600'>{missingFields.join(', ')}</div>
+          <div className='text-red-600'>{getMissingFieldsChineseText(productType, missingFields)}</div>
         </div>
       )}
       {mergedParams && Object.keys(mergedParams).length > 0 && (
         <div>
           <div className='font-semibold text-slate-700'>合并后参数：</div>
-          <div className='text-slate-600'>{formatParams(mergedParams)}</div>
+          <div className='text-slate-600'>{formatParams(mergedParams, productType)}</div>
         </div>
       )}
       {quoteParams && Object.keys(quoteParams).length > 0 && (
         <div>
           <div className='font-semibold text-green-700'>报价用参数：</div>
-          <div className='text-green-600'>{formatParams(quoteParams)}</div>
+          <div className='text-green-600'>{formatParams(quoteParams, productType)}</div>
         </div>
       )}
     </div>
@@ -81,6 +88,10 @@ export default function ConversationDetailPage({ params }: { params: { id: strin
   const [conversation, setConversation] = useState<ConversationDetails | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [reflectionLoading, setReflectionLoading] = useState(false)
+  const [reflectionIssueType, setReflectionIssueType] = useState<'PARAM_MISSING' | 'PARAM_WRONG' | 'QUOTE_INACCURATE' | 'SHOULD_HANDOFF'>('PARAM_WRONG')
+  const [correctedParamsText, setCorrectedParamsText] = useState('')
+  const [correctedQuoteSummary, setCorrectedQuoteSummary] = useState('')
 
   const conversationId = Number(params.id)
 
@@ -107,6 +118,56 @@ export default function ConversationDetailPage({ params }: { params: { id: strin
         setLoading(false)
       })
   }, [conversationId])
+
+  const handleGenerateReflection = async () => {
+    if (!conversation || reflectionLoading) return
+
+    let correctedParams: Record<string, any> | undefined
+    if (correctedParamsText.trim()) {
+      try {
+        correctedParams = JSON.parse(correctedParamsText)
+      } catch {
+        setError('修正参数 JSON 格式无效')
+        return
+      }
+    }
+
+    setReflectionLoading(true)
+    setError(null)
+
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/reflection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          issueType: reflectionIssueType,
+          correctedParams,
+          correctedQuoteSummary: correctedQuoteSummary.trim() || undefined,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok || !data.ok) {
+        setError(data.message || '生成反思记录失败')
+        return
+      }
+
+      setConversation((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          reflections: [data.data, ...(prev.reflections || [])],
+        }
+      })
+
+      setCorrectedParamsText('')
+      setCorrectedQuoteSummary('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '生成反思记录失败')
+    } finally {
+      setReflectionLoading(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -291,6 +352,78 @@ export default function ConversationDetailPage({ params }: { params: { id: strin
             ))}
             {conversation.handoffs.length === 0 && (
               <p className='text-gray-500'>暂无人工接管记录</p>
+            )}
+          </div>
+        </div>
+
+        {/* 反思记录 */}
+        <div className='rounded-lg bg-white p-6 shadow'>
+          <div className='mb-4 flex items-center justify-between'>
+            <h2 className='text-lg font-semibold'>反思记录 ({conversation.reflections?.length || 0})</h2>
+            <button
+              onClick={handleGenerateReflection}
+              disabled={reflectionLoading}
+              className='rounded bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50'
+            >
+              {reflectionLoading ? '生成中...' : '生成反思记录'}
+            </button>
+          </div>
+
+          <div className='mb-4 grid gap-3 rounded border p-3'>
+            <label className='text-sm'>
+              <span className='mb-1 block font-medium'>问题类型</span>
+              <select
+                value={reflectionIssueType}
+                onChange={(e) => setReflectionIssueType(e.target.value as any)}
+                className='w-full rounded border px-3 py-2 text-sm'
+              >
+                <option value='PARAM_MISSING'>PARAM_MISSING</option>
+                <option value='PARAM_WRONG'>PARAM_WRONG</option>
+                <option value='QUOTE_INACCURATE'>QUOTE_INACCURATE</option>
+                <option value='SHOULD_HANDOFF'>SHOULD_HANDOFF</option>
+              </select>
+            </label>
+
+            <label className='text-sm'>
+              <span className='mb-1 block font-medium'>修正参数（JSON，可选）</span>
+              <textarea
+                value={correctedParamsText}
+                onChange={(e) => setCorrectedParamsText(e.target.value)}
+                rows={4}
+                placeholder='例如：{"pageCount": 32, "innerWeight": 157}'
+                className='w-full rounded border px-3 py-2 font-mono text-xs'
+              />
+            </label>
+
+            <label className='text-sm'>
+              <span className='mb-1 block font-medium'>修正后报价摘要（可选）</span>
+              <input
+                value={correctedQuoteSummary}
+                onChange={(e) => setCorrectedQuoteSummary(e.target.value)}
+                placeholder='例如：人工核价后总价 ¥1980.00'
+                className='w-full rounded border px-3 py-2 text-sm'
+              />
+            </label>
+          </div>
+
+          <div className='space-y-3'>
+            {(conversation.reflections || []).map((item) => (
+              <div key={item.id} className='rounded border p-4'>
+                <div className='mb-2 flex items-center justify-between'>
+                  <div className='text-sm font-medium'>#{item.id} {item.issueType}</div>
+                  <span className='rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700'>
+                    {item.status}
+                  </span>
+                </div>
+                <p className='mb-2 text-sm'><span className='font-medium'>反思：</span>{item.reflectionText}</p>
+                <p className='text-sm'><span className='font-medium'>建议草案：</span>{item.suggestionDraft}</p>
+                <div className='mt-2 text-xs text-gray-500'>
+                  创建时间：{new Date(item.createdAt).toLocaleString()}
+                </div>
+              </div>
+            ))}
+            {(conversation.reflections?.length || 0) === 0 && (
+              <p className='text-gray-500'>暂无反思记录</p>
             )}
           </div>
         </div>

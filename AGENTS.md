@@ -41,11 +41,13 @@ Not in current MVP:
 9. Keep implementation simple and locally runnable first.
 
 ## Product categories for MVP
-Prioritize only these categories at first:
+Current live scope in this repository:
 - Album / brochure
 - Flyer
 - Business card
 - Poster
+
+Planned but not yet implemented in the current codebase:
 - Sticker
 - Standard paper bag
 

@@ -42,10 +42,20 @@ function mergeParameters(historical: Record<string, any> | null, current: Record
     'paperType',
     'paperWeight',
     'printSides',
+    'finishType',
+    'lamination',
   ]
 
   validFields.forEach((key) => {
     if (current[key] !== undefined && current[key] !== null) {
+      if (
+        key === 'productType' &&
+        historical?.productType &&
+        historical.productType !== 'album' &&
+        current.productType === 'album'
+      ) {
+        return
+      }
       merged[key] = current[key]
     }
   })
@@ -68,6 +78,23 @@ function checkMissingFields(params: Record<string, any>): string[] {
       'paperType',
       'paperWeight',
       'printSides',
+    ]
+  } else if (productType === 'business_card') {
+    requiredFields = [
+      'productType',
+      'finishedSize',
+      'quantity',
+      'paperType',
+      'paperWeight',
+      'printSides',
+    ]
+  } else if (productType === 'poster') {
+    requiredFields = [
+      'productType',
+      'finishedSize',
+      'quantity',
+      'paperType',
+      'paperWeight',
     ]
   } else {
     requiredFields = [
@@ -154,6 +181,23 @@ test('参数合并: 清理嵌套字段', () => {
   assert(merged.productType === 'album', '其他字段应保留')
 })
 
+test('参数合并: 避免补参轮次将非 album 覆盖为默认 album', () => {
+  const historical = {
+    productType: 'poster',
+    finishedSize: 'A2',
+    quantity: 80,
+  }
+  const current = {
+    productType: 'album',
+    paperType: 'coated',
+    paperWeight: 157,
+  }
+
+  const merged = mergeParameters(historical, current)
+  assert(merged.productType === 'poster', 'poster 不应被默认 album 覆盖')
+  assert(merged.paperType === 'coated', '补参字段应正常合并')
+})
+
 // 缺陷检测测试
 test('缺陷检测: Album 缺所有必填字段', () => {
   const params = { productType: 'album' }
@@ -226,6 +270,32 @@ test('缺陷检测: Flyer 完全齐全', () => {
   const missing = checkMissingFields(params)
 
   assert(missing.length === 0, 'Flyer 字段齐全，不应缺陷')
+})
+
+test('缺陷检测: Poster 必填检测', () => {
+  const params = {
+    productType: 'poster',
+    finishedSize: 'A2',
+    quantity: 100,
+    paperType: 'coated',
+    paperWeight: 157,
+  }
+  const missing = checkMissingFields(params)
+  assert(missing.length === 0, 'Poster 必填齐全，不应缺陷')
+})
+
+test('缺陷检测: Poster 允许缺少覆膜字段', () => {
+  const params = {
+    productType: 'poster',
+    finishedSize: 'A2',
+    quantity: 100,
+    paperType: 'coated',
+    // paperWeight 缺失
+  }
+  const missing = checkMissingFields(params)
+
+  assert(missing.includes('paperWeight'), 'Poster 应缺 paperWeight')
+  assert(!missing.includes('lamination'), 'Poster 不应要求 lamination')
 })
 
 test('缺陷检测: 空字符串视为缺陷', () => {

@@ -1,5 +1,15 @@
 import { NextResponse } from 'next/server'
 import { getQuoteById } from '@/server/db/conversations'
+import { createErrorResponse, withErrorHandler, ErrorCode } from '@/server/api/response'
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
 
 function formatMoney(cents: number | null | undefined) {
   if (cents == null || Number.isNaN(cents)) return '¥0.00'
@@ -17,6 +27,11 @@ function quoteParameterSummary(params: Record<string, any>) {
     params.innerPaper && `内页纸: ${params.innerPaper}`,
     params.innerWeight && `内页克重: ${params.innerWeight}g`,
     params.bindingType && `装订: ${params.bindingType}`,
+    params.paperType && `纸张: ${params.paperType}`,
+    params.paperWeight && `克重: ${params.paperWeight}g`,
+    params.printSides && `单双面: ${params.printSides}`,
+    params.lamination && `覆膜: ${params.lamination}`,
+    params.finishType && `工艺: ${params.finishType}`,
     params.quantity && `数量: ${params.quantity}`,
   ].filter(Boolean)
 
@@ -24,21 +39,25 @@ function quoteParameterSummary(params: Record<string, any>) {
 }
 
 export async function GET(_request: Request, { params }: { params: { id?: string } }) {
-  const quoteId = Number(params.id)
-  if (!Number.isInteger(quoteId) || quoteId <= 0) {
-    return NextResponse.json({ ok: false, error: 'invalid quote id' }, { status: 400 })
-  }
+  return withErrorHandler(async () => {
+    const quoteId = Number(params.id)
+    if (!Number.isInteger(quoteId) || quoteId <= 0) {
+      return createErrorResponse('报价ID无效', ErrorCode.VALIDATION_ERROR, 400)
+    }
 
-  const quote = await getQuoteById(quoteId)
-  if (!quote) {
-    return NextResponse.json({ ok: false, error: 'quote not found' }, { status: 404 })
-  }
+    const quote = await getQuoteById(quoteId)
+    if (!quote) {
+      return createErrorResponse('报价不存在', ErrorCode.NOT_FOUND, 404)
+    }
 
   const parameters = (quote.parameters as Record<string, any>) ?? {}
   const pricing = (quote.pricingDetails as Record<string, any>) ?? {}
   const unitPrice = pricing.unitPrice ?? (parameters.quantity ? quote.subtotalCents / 100 / parameters.quantity : 0)
-  const summary = parameters.summary || (quote.parameters as Record<string, any>)?.summary || quote.productCategory?.name || '报价信息'
-  const specSummary = quoteParameterSummary(parameters)
+  const summary = escapeHtml(String(parameters.summary || (quote.parameters as Record<string, any>)?.summary || quote.productCategory?.name || '报价信息'))
+  const specSummary = escapeHtml(quoteParameterSummary(parameters))
+  const productType = escapeHtml(String(parameters.productType || quote.productCategory?.name || 'N/A'))
+  const quoteStatus = escapeHtml(String(quote.status))
+  const createdAtText = escapeHtml(new Date(quote.createdAt).toLocaleString())
 
   const html = `<!doctype html>
   <html lang="zh-CN">
@@ -66,13 +85,13 @@ export async function GET(_request: Request, { params }: { params: { id?: string
       <div class="meta">
         <div><strong>Quote ID：</strong>${quote.id}</div>
         <div><strong>Conversation ID：</strong>${quote.conversationId}</div>
-        <div><strong>状态：</strong>${quote.status}</div>
-        <div><strong>创建时间：</strong>${new Date(quote.createdAt).toLocaleString()}</div>
+        <div><strong>状态：</strong>${quoteStatus}</div>
+        <div><strong>创建时间：</strong>${createdAtText}</div>
       </div>
 
       <table>
         <tbody>
-          <tr><th>产品类型</th><td>${parameters.productType || quote.productCategory?.name || 'N/A'}</td></tr>
+          <tr><th>产品类型</th><td>${productType}</td></tr>
           <tr><th>规格参数摘要</th><td>${specSummary}</td></tr>
           <tr><th>单价</th><td>${typeof unitPrice === 'number' ? `¥${Number(unitPrice).toFixed(2)}` : unitPrice}</td></tr>
           <tr><th>总价（产品小计）</th><td>${formatMoney(quote.subtotalCents)}</td></tr>
@@ -99,4 +118,5 @@ export async function GET(_request: Request, { params }: { params: { id?: string
       'Content-Type': 'text/html; charset=utf-8',
     },
   })
+  }, 'quote-export')
 }

@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import { listConversations } from '@/server/db/conversations'
+import { withErrorHandler } from '@/server/api/response'
 
 export async function GET() {
-  try {
+  return withErrorHandler(async () => {
     const conversations = await listConversations()
 
     const normalized = conversations.map((c) => ({
@@ -15,8 +16,5 @@ export async function GET() {
     }))
 
     return NextResponse.json({ ok: true, data: normalized })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    return NextResponse.json({ ok: false, message }, { status: 500 })
-  }
+  }, 'conversations-list')
 }

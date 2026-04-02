@@ -1,19 +1,5 @@
-/*
-  Warnings:
-
-  - You are about to drop the column `text` on the `Quote` table. All the data in the column will be lost.
-  - Added the required column `conversationId` to the `Quote` table without a default value. This is not possible if the table is not empty.
-  - Added the required column `parameters` to the `Quote` table without a default value. This is not possible if the table is not empty.
-  - Added the required column `productCategoryId` to the `Quote` table without a default value. This is not possible if the table is not empty.
-  - Added the required column `shippingCents` to the `Quote` table without a default value. This is not possible if the table is not empty.
-  - Added the required column `subtotalCents` to the `Quote` table without a default value. This is not possible if the table is not empty.
-  - Added the required column `taxCents` to the `Quote` table without a default value. This is not possible if the table is not empty.
-  - Added the required column `totalCents` to the `Quote` table without a default value. This is not possible if the table is not empty.
-  - Added the required column `updatedAt` to the `Quote` table without a default value. This is not possible if the table is not empty.
-
-*/
 -- CreateEnum
-CREATE TYPE "ConversationStatus" AS ENUM ('OPEN', 'PENDING', 'CLOSED', 'HANDOFF');
+CREATE TYPE "ConversationStatus" AS ENUM ('OPEN', 'MISSING_FIELDS', 'QUOTED', 'PENDING_HUMAN', 'CLOSED');
 
 -- CreateEnum
 CREATE TYPE "MessageSender" AS ENUM ('CUSTOMER', 'ASSISTANT', 'HUMAN', 'SYSTEM');
@@ -33,18 +19,11 @@ CREATE TYPE "PricingRuleType" AS ENUM ('BASE', 'ADDITIONAL', 'DISCOUNT');
 -- CreateEnum
 CREATE TYPE "FeedbackUserType" AS ENUM ('CUSTOMER', 'AGENT', 'SYSTEM');
 
--- AlterTable
-ALTER TABLE "Quote" DROP COLUMN "text",
-ADD COLUMN     "conversationId" INTEGER NOT NULL,
-ADD COLUMN     "parameters" JSONB NOT NULL,
-ADD COLUMN     "pricingDetails" JSONB,
-ADD COLUMN     "productCategoryId" INTEGER NOT NULL,
-ADD COLUMN     "shippingCents" INTEGER NOT NULL,
-ADD COLUMN     "status" "QuoteStatus" NOT NULL DEFAULT 'PENDING',
-ADD COLUMN     "subtotalCents" INTEGER NOT NULL,
-ADD COLUMN     "taxCents" INTEGER NOT NULL,
-ADD COLUMN     "totalCents" INTEGER NOT NULL,
-ADD COLUMN     "updatedAt" TIMESTAMP(3) NOT NULL;
+-- CreateEnum
+CREATE TYPE "ReflectionIssueType" AS ENUM ('PARAM_MISSING', 'PARAM_WRONG', 'QUOTE_INACCURATE', 'SHOULD_HANDOFF');
+
+-- CreateEnum
+CREATE TYPE "ReflectionStatus" AS ENUM ('NEW', 'REVIEWED', 'APPROVED', 'REJECTED');
 
 -- CreateTable
 CREATE TABLE "Conversation" (
@@ -70,6 +49,24 @@ CREATE TABLE "Message" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Message_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Quote" (
+    "id" SERIAL NOT NULL,
+    "conversationId" INTEGER NOT NULL,
+    "productCategoryId" INTEGER NOT NULL,
+    "parameters" JSONB NOT NULL,
+    "pricingDetails" JSONB,
+    "subtotalCents" INTEGER NOT NULL,
+    "shippingCents" INTEGER NOT NULL,
+    "taxCents" INTEGER NOT NULL,
+    "totalCents" INTEGER NOT NULL,
+    "status" "QuoteStatus" NOT NULL DEFAULT 'PENDING',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Quote_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -158,6 +155,24 @@ CREATE TABLE "FeedbackAnnotation" (
     CONSTRAINT "FeedbackAnnotation_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "ReflectionRecord" (
+    "id" SERIAL NOT NULL,
+    "conversationId" INTEGER NOT NULL,
+    "quoteId" INTEGER,
+    "originalExtractedParams" JSONB,
+    "correctedParams" JSONB,
+    "originalQuoteSummary" TEXT,
+    "correctedQuoteSummary" TEXT,
+    "issueType" "ReflectionIssueType" NOT NULL,
+    "reflectionText" TEXT NOT NULL,
+    "suggestionDraft" TEXT NOT NULL,
+    "status" "ReflectionStatus" NOT NULL DEFAULT 'NEW',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "ReflectionRecord_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "ProductCategory_name_key" ON "ProductCategory"("name");
 
@@ -166,6 +181,9 @@ CREATE UNIQUE INDEX "ProductCategory_slug_key" ON "ProductCategory"("slug");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ProductParameterDefinition_productCategoryId_key_key" ON "ProductParameterDefinition"("productCategoryId", "key");
+
+-- CreateIndex
+CREATE INDEX "ReflectionRecord_conversationId_createdAt_idx" ON "ReflectionRecord"("conversationId", "createdAt");
 
 -- AddForeignKey
 ALTER TABLE "Message" ADD CONSTRAINT "Message_conversationId_fkey" FOREIGN KEY ("conversationId") REFERENCES "Conversation"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -193,3 +211,9 @@ ALTER TABLE "FeedbackAnnotation" ADD CONSTRAINT "FeedbackAnnotation_conversation
 
 -- AddForeignKey
 ALTER TABLE "FeedbackAnnotation" ADD CONSTRAINT "FeedbackAnnotation_quoteId_fkey" FOREIGN KEY ("quoteId") REFERENCES "Quote"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ReflectionRecord" ADD CONSTRAINT "ReflectionRecord_conversationId_fkey" FOREIGN KEY ("conversationId") REFERENCES "Conversation"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ReflectionRecord" ADD CONSTRAINT "ReflectionRecord_quoteId_fkey" FOREIGN KEY ("quoteId") REFERENCES "Quote"("id") ON DELETE SET NULL ON UPDATE CASCADE;

@@ -8,9 +8,16 @@
     "start": "next start",
     "lint": "next lint",
     "prepare": "prisma generate",
-    "seed": "tsx prisma/seed.ts",
+    "check:launch:env": "tsx scripts/check-launch-env.ts",
+    "check:launch": "npm run check:launch:env && npm run test:mvp && npm run build && npx prisma migrate status",
+    "db:reset:local": "npx prisma migrate reset --force && npm run seed",
+    "seed": "NODE_ENV=development tsx prisma/seed.ts",
+    "seed:prod:allow": "NODE_ENV=production ALLOW_SEED=true tsx prisma/seed.ts",
     "test": "tsx src/server/pricing/albumQuote.test.ts",
+    "test:business-card": "tsx src/server/pricing/businessCardQuote.test.ts",
+    "test:poster": "tsx src/server/pricing/posterQuote.test.ts",
     "test:ai": "tsx src/server/ai/extractQuoteParams.test.ts",
+    "test:chain-smoke": "bash scripts/consultation-recommendation-quote-smoke.sh",
     "test:mvp": "tsx src/tests/mvp-regression.test.ts",
     "test:pricing": "tsx src/tests/pricing-engines.test.ts",
     "test:params": "tsx src/tests/parameter-merging.test.ts"
@@ -23,7 +30,7 @@
     "prisma": "5.16.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "zod": "3.25.0"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "20.14.9",

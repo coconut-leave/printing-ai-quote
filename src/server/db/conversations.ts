@@ -1,4 +1,69 @@
 import { prisma } from './prisma'
+import { getProductCategoryLookup } from '@/lib/catalog/productCategoryMapping'
+
+async function getOrCreateProductCategory(productType: string) {
+  const { canonical, legacySlugs, legacyNames } = getProductCategoryLookup(productType)
+
+  const canonicalCategory = await prisma.productCategory.findUnique({
+    where: { slug: canonical.slug },
+  })
+
+  if (canonicalCategory) {
+    return canonicalCategory
+  }
+
+  const orConditions = []
+  if (legacySlugs.length > 0) {
+    orConditions.push({ slug: { in: legacySlugs } })
+  }
+  if (legacyNames.length > 0) {
+    orConditions.push({ name: { in: legacyNames } })
+  }
+
+  if (orConditions.length > 0) {
+    const legacyCategory = await prisma.productCategory.findFirst({
+      where: {
+        OR: orConditions,
+      },
+    })
+
+    if (legacyCategory) {
+      const needsCanonicalUpdate =
+        legacyCategory.slug !== canonical.slug ||
+        legacyCategory.name !== canonical.name ||
+        legacyCategory.description !== canonical.description ||
+        legacyCategory.isActive !== true
+
+      if (!needsCanonicalUpdate) {
+        return legacyCategory
+      }
+
+      console.warn(
+        `[createQuoteRecord] canonicalizing legacy product category id=${legacyCategory.id} `
+          + `from slug=${legacyCategory.slug} name=${legacyCategory.name} to slug=${canonical.slug} name=${canonical.name}`
+      )
+
+      return prisma.productCategory.update({
+        where: { id: legacyCategory.id },
+        data: {
+          slug: canonical.slug,
+          name: canonical.name,
+          description: canonical.description,
+          isActive: true,
+        },
+      })
+    }
+  }
+
+  return prisma.productCategory.create({
+    data: {
+      name: canonical.name,
+      slug: canonical.slug,
+      description: canonical.description,
+      isActive: true,
+    },
+  })
+}
 
 export async function createConversation(options?: { customerName?: string; customerId?: string }) {
   return prisma.conversation.create({
@@ -29,10 +94,23 @@ export async function addMessageToConversation(conversationId: number, sender: '
 }
 
 export async function updateConversationStatus(conversationId: number, status: 'OPEN' | 'MISSING_FIELDS' | 'QUOTED' | 'PENDING_HUMAN' | 'CLOSED') {
-  return prisma.conversation.update({
-    where: { id: conversationId },
-    data: { status },
-  })
+  try {
+    return await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { status },
+    })
+  } catch (error) {
+    const message = `[updateConversationStatus] failed conversationId=${conversationId}, status=${status}`
+    if (process.env.NODE_ENV === 'production') {
+      console.error(message)
+      throw error
+    }
+
+    // Keep local development usable while migrations are still being aligned.
+    console.warn(`${message} (development mode tolerated)`) 
+    console.warn(error)
+    return null
+  }
 }
 
 export async function createHandoffRecord(conversationId: number, reason: string, assignedTo?: string) {
@@ -59,6 +137,36 @@ export async function getConversationWithDetails(conversationId: number) {
       handoffs: {
         orderBy: { createdAt: 'desc' },
       },
+      reflections: {
+        orderBy: { createdAt: 'desc' },
+      },
+    },
+  })
+}
+
+export async function createReflectionRecord(params: {
+  conversationId: number
+  quoteId?: number
+  originalExtractedParams?: Record<string, any>
+  correctedParams?: Record<string, any>
+  originalQuoteSummary?: string
+  correctedQuoteSummary?: string
+  issueType: 'PARAM_MISSING' | 'PARAM_WRONG' | 'QUOTE_INACCURATE' | 'SHOULD_HANDOFF'
+  reflectionText: string
+  suggestionDraft: string
+}) {
+  return prisma.reflectionRecord.create({
+    data: {
+      conversationId: params.conversationId,
+      quoteId: params.quoteId ?? null,
+      originalExtractedParams: params.originalExtractedParams,
+      correctedParams: params.correctedParams,
+      originalQuoteSummary: params.originalQuoteSummary ?? null,
+      correctedQuoteSummary: params.correctedQuoteSummary ?? null,
+      issueType: params.issueType,
+      reflectionText: params.reflectionText,
+      suggestionDraft: params.suggestionDraft,
+      status: 'NEW',
     },
   })
 }
@@ -121,18 +229,7 @@ export async function createQuoteRecord(params: {
   normalizedParams: object
   pricingDetails?: object
 }) {
-  // 查找或创建默认品类 brochure
-  let productCategory = await prisma.productCategory.findFirst({ where: { slug: 'brochure' } })
-  if (!productCategory) {
-    productCategory = await prisma.productCategory.create({
-      data: {
-        name: 'Brochure',
-        slug: 'brochure',
-        description: 'Album/brochure product category',
-        isActive: true,
-      },
-    })
-  }
+  const productCategory = await getOrCreateProductCategory(params.productType)
 
   return prisma.quote.create({
     data: {
@@ -171,4 +268,190 @@ export async function listConversations() {
       },
     },
   })
+}
+
+export async function getConsultationTrackingDataset(limit: number = 200) {
+  return prisma.conversation.findMany({
+    orderBy: { updatedAt: 'desc' },
+    take: limit,
+    select: {
+      id: true,
+      status: true,
+      updatedAt: true,
+      messages: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          sender: true,
+          metadata: true,
+          createdAt: true,
+        },
+      },
+      quotes: {
+        select: {
+          id: true,
+        },
+      },
+      handoffs: {
+        select: {
+          reason: true,
+          createdAt: true,
+        },
+      },
+    },
+  })
+}
+
+// ===== Reflection review & aggregation =====
+export async function updateReflectionStatus(
+  reflectionId: number,
+  status: 'NEW' | 'REVIEWED' | 'APPROVED' | 'REJECTED'
+) {
+  return prisma.reflectionRecord.update({
+    where: { id: reflectionId },
+    data: { status },
+  })
+}
+
+export async function getAllReflections(
+  limit: number = 50,
+  offset: number = 0,
+  filters?: {
+    status?: 'NEW' | 'REVIEWED' | 'APPROVED' | 'REJECTED'
+    issueType?: 'PARAM_MISSING' | 'PARAM_WRONG' | 'QUOTE_INACCURATE' | 'SHOULD_HANDOFF'
+  }
+) {
+  const where = {
+    ...(filters?.status ? { status: filters.status } : {}),
+    ...(filters?.issueType ? { issueType: filters.issueType } : {}),
+  }
+
+  const records = await prisma.reflectionRecord.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+    skip: offset,
+    take: limit,
+    include: {
+      conversation: {
+        select: {
+          id: true,
+          customerName: true,
+          status: true,
+          createdAt: true,
+        },
+      },
+      quote: {
+        select: {
+          id: true,
+          totalCents: true,
+        },
+      },
+    },
+  })
+
+  const total = await prisma.reflectionRecord.count({ where })
+
+  return { records, total }
+}
+
+export async function getReflectionStats() {
+  // Function to compute stats from recent reflections
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
+  // Get issue type distribution (last 7 days)
+  const issueTypeDistribution = await prisma.reflectionRecord.groupBy({
+    by: ['issueType'],
+    where: {
+      createdAt: { gte: sevenDaysAgo },
+    },
+    _count: true,
+  })
+
+  // Get most common missing fields
+  const reflectionsWithMissing = await prisma.reflectionRecord.findMany({
+    where: {
+      issueType: 'PARAM_MISSING',
+      createdAt: { gte: sevenDaysAgo },
+    },
+    select: {
+      originalExtractedParams: true,
+      correctedParams: true,
+    },
+  })
+
+  const missingFieldsCount: Record<string, number> = {}
+  reflectionsWithMissing.forEach((r) => {
+    if (r.correctedParams && typeof r.correctedParams === 'object') {
+      const corrected = r.correctedParams as Record<string, any>
+      Object.keys(corrected).forEach((key) => {
+        missingFieldsCount[key] = (missingFieldsCount[key] || 0) + 1
+      })
+    }
+  })
+
+  // Get handoff reasons (SHOULD_HANDOFF type)
+  const handoffReflections = await prisma.reflectionRecord.findMany({
+    where: {
+      issueType: 'SHOULD_HANDOFF',
+      createdAt: { gte: sevenDaysAgo },
+    },
+    select: {
+      suggestionDraft: true,
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 10,
+  })
+
+  // Get status breakdown
+  const statusBreakdown = await prisma.reflectionRecord.groupBy({
+    by: ['status'],
+    _count: true,
+  })
+
+  return {
+    issueTypeDistribution,
+    topMissingFields: Object.entries(missingFieldsCount)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([field, count]) => ({ field, count })),
+    recentHandoffReasons: handoffReflections.map((r) => r.suggestionDraft).slice(0, 5),
+    statusBreakdown: statusBreakdown.map((item) => ({
+      status: item.status,
+      count: item._count,
+    })),
+    period: '7 days',
+  }
+}
+
+// ===== Improvement suggestions (derived from APPROVED reflections) =====
+export async function getApprovedReflections(limit: number = 50, offset: number = 0) {
+  const records = await prisma.reflectionRecord.findMany({
+    where: {
+      status: 'APPROVED',
+    },
+    orderBy: { createdAt: 'desc' },
+    skip: offset,
+    take: limit,
+    include: {
+      conversation: {
+        select: {
+          id: true,
+          customerName: true,
+          status: true,
+        },
+      },
+      quote: {
+        select: {
+          id: true,
+          totalCents: true,
+        },
+      },
+    },
+  })
+
+  const total = await prisma.reflectionRecord.count({
+    where: { status: 'APPROVED' },
+  })
+
+  return { records, total }
 }

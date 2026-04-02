@@ -16,6 +16,20 @@ async function run() {
   }
 
   console.log('AI parsing basic run complete.')
+
+  const posterText = '我要做200张A2海报，157g铜版纸，哑膜'
+  const poster = await extractQuoteParams(posterText)
+  console.log('Poster extracted:', JSON.stringify(poster, null, 2))
+
+  if (poster.productType !== 'poster') {
+    throw new Error('poster productType should be poster')
+  }
+  if (poster.finishedSize !== 'A2') {
+    throw new Error('poster finishedSize should be A2')
+  }
+  if (poster.quantity !== 200) {
+    throw new Error('poster quantity should be 200')
+  }
 }
 
 run().catch((err) => {

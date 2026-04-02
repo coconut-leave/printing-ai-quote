@@ -1,5 +1,6 @@
 import { calculateAlbumQuote } from '@/server/pricing/albumQuote'
 import { calculateFlyerQuote } from '@/server/pricing/flyerQuote'
+import { calculatePosterQuote } from '@/server/pricing/posterQuote'
 
 interface TestResult {
   name: string
@@ -289,6 +290,39 @@ test('Flyer: 金额精度（2位小数）', () => {
   assert(hasTwoDecimals(result.totalPrice), `totalPrice ${result.totalPrice} 应为 2 位小数`)
   assert(hasTwoDecimals(result.tax), `tax ${result.tax} 应为 2 位小数`)
   assert(hasTwoDecimals(result.finalPrice), `finalPrice ${result.finalPrice} 应为 2 位小数`)
+})
+
+test('Poster: 基础报价计算', () => {
+  const result = calculatePosterQuote({
+    finishedSize: 'A2',
+    quantity: 120,
+    paperType: 'coated',
+    paperWeight: 157,
+    lamination: 'none',
+  })
+
+  assert(result.unitPrice > 0, 'unitPrice 应大于 0')
+  assert(result.totalPrice === result.unitPrice * 120, 'totalPrice = unitPrice * quantity')
+  assert(result.shippingFee === 40, '海报国内运费应为 40')
+})
+
+test('Poster: 覆膜系数影响单价', () => {
+  const none = calculatePosterQuote({
+    finishedSize: 'A2',
+    quantity: 100,
+    paperType: 'coated',
+    paperWeight: 157,
+    lamination: 'none',
+  })
+  const matte = calculatePosterQuote({
+    finishedSize: 'A2',
+    quantity: 100,
+    paperType: 'coated',
+    paperWeight: 157,
+    lamination: 'matte',
+  })
+
+  assert(matte.unitPrice > none.unitPrice, '覆膜单价应高于不覆膜')
 })
 
 console.log('\n=== 测试总结 ===\n')

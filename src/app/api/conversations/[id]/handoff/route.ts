@@ -1,29 +1,39 @@
 import { NextResponse } from 'next/server'
-import { updateConversationStatus, createHandoffRecord } from '@/server/db/conversations'
+import { updateConversationStatus, createHandoffRecord, getConversationById } from '@/server/db/conversations'
+import { createErrorResponse, withErrorHandler, ErrorCode } from '@/server/api/response'
+import { parseHandoffRequestPayload } from '@/server/conversations/handoffRequest'
 
 export async function POST(request: Request, { params }: { params: { id: string }}) {
-  const conversationId = Number(params.id)
-  if (Number.isNaN(conversationId)) {
-    return NextResponse.json({ ok: false, message: 'Invalid conversation ID' }, { status: 400 })
-  }
+  return withErrorHandler(async () => {
+    const conversationId = Number(params.id)
+    if (!Number.isInteger(conversationId) || conversationId <= 0) {
+      return createErrorResponse('会话ID无效', ErrorCode.VALIDATION_ERROR, 400)
+    }
 
-  let payload: any
-  try {
-    payload = await request.json()
-  } catch {
-    payload = {}
-  }
+    let payload: any
+    try {
+      payload = await request.json()
+    } catch {
+      payload = {}
+    }
 
-  const reason = typeof payload.reason === 'string' ? payload.reason : '人工接管请求'
-  const assignedTo = typeof payload.assignedTo === 'string' ? payload.assignedTo : undefined
+    const parsedPayload = parseHandoffRequestPayload(payload)
+    if (!parsedPayload.success) {
+      return createErrorResponse(parsedPayload.error, ErrorCode.VALIDATION_ERROR, 400)
+    }
 
-  try {
-    const conversation = await updateConversationStatus(conversationId, 'PENDING_HUMAN')
-    const handoff = await createHandoffRecord(conversationId, reason, assignedTo)
+    const conversation = await getConversationById(conversationId)
+    if (!conversation) {
+      return createErrorResponse('会话不存在', ErrorCode.NOT_FOUND, 404)
+    }
 
-    return NextResponse.json({ ok: true, data: { conversation, handoff } })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    return NextResponse.json({ ok: false, message }, { status: 500 })
-  }
+    const updatedConversation = await updateConversationStatus(conversationId, 'PENDING_HUMAN')
+    const handoff = await createHandoffRecord(
+      conversationId,
+      parsedPayload.data.reason,
+      parsedPayload.data.assignedTo
+    )
+
+    return NextResponse.json({ ok: true, data: { conversation: updatedConversation, handoff } })
+  }, 'conversation-handoff')
 }
