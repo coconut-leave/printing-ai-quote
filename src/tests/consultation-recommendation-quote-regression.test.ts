@@ -91,7 +91,33 @@ async function initializeTestRuntime() {
   const routeModule = await import('@/server/chat/createChatPostHandler')
   const conversationModule = await import('@/server/db/conversations')
 
-  const postHandler = routeModule.createChatPostHandler({
+  const createChatPostHandler = typeof routeModule.createChatPostHandler === 'function'
+    ? routeModule.createChatPostHandler
+    : typeof routeModule.default?.createChatPostHandler === 'function'
+    ? routeModule.default.createChatPostHandler
+    : null
+
+  if (!createChatPostHandler) {
+    throw new Error('createChatPostHandler export not found')
+  }
+
+  const createConversation = typeof conversationModule.createConversation === 'function'
+    ? conversationModule.createConversation
+    : typeof conversationModule.default?.createConversation === 'function'
+    ? conversationModule.default.createConversation
+    : null
+
+  const addMessageToConversation = typeof conversationModule.addMessageToConversation === 'function'
+    ? conversationModule.addMessageToConversation
+    : typeof conversationModule.default?.addMessageToConversation === 'function'
+    ? conversationModule.default.addMessageToConversation
+    : null
+
+  if (!createConversation || !addMessageToConversation) {
+    throw new Error('conversation test helpers not found')
+  }
+
+  const postHandler = createChatPostHandler({
     extractQuoteParams: mockExtractQuoteParams,
   })
 
@@ -108,8 +134,8 @@ async function initializeTestRuntime() {
     return response.json()
   }
 
-  createConversationForTest = conversationModule.createConversation
-  addMessageForTest = conversationModule.addMessageToConversation
+  createConversationForTest = createConversation
+  addMessageForTest = addMessageToConversation
 }
 
 console.log('\n=== 咨询 -> 推荐 -> 报价 正式回归测试 ===\n')
