@@ -1,0 +1,180 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Conversation {
+  id            Int       @id @default(autoincrement())
+  customerName  String?
+  customerId    String?
+  status        ConversationStatus @default(OPEN)
+  topic         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  messages      Message[]
+  quotes        Quote[]
+  handoffs      HandoffRecord[]
+  feedbacks     FeedbackAnnotation[]
+}
+
+enum ConversationStatus {
+  OPEN
+  MISSING_FIELDS
+  QUOTED
+  PENDING_HUMAN
+  CLOSED
+}
+
+model Message {
+  id             Int           @id @default(autoincrement())
+  conversation   Conversation  @relation(fields: [conversationId], references: [id])
+  conversationId Int
+  sender         MessageSender
+  type           MessageType   @default(TEXT)
+  content        String
+  metadata       Json?
+  createdAt      DateTime      @default(now())
+}
+
+enum MessageSender {
+  CUSTOMER
+  ASSISTANT
+  HUMAN
+  SYSTEM
+}
+
+enum MessageType {
+  TEXT
+  FILE
+  NOTE
+  COMMAND
+}
+
+model Quote {
+  id                Int               @id @default(autoincrement())
+  conversation      Conversation      @relation(fields: [conversationId], references: [id])
+  conversationId    Int
+  productCategory   ProductCategory   @relation(fields: [productCategoryId], references: [id])
+  productCategoryId Int
+  parameters        Json              // structured quote params
+  pricingDetails    Json?             // raw internal pricing breakdown
+  subtotalCents     Int
+  shippingCents     Int
+  taxCents          Int
+  totalCents        Int
+  status            QuoteStatus       @default(PENDING)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  feedbacks         FeedbackAnnotation[]
+}
+
+enum QuoteStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+model ProductCategory {
+  id          Int                            @id @default(autoincrement())
+  name        String                         @unique
+  slug        String                         @unique
+  description String?
+  isActive    Boolean                        @default(true)
+  parameters  ProductParameterDefinition[]
+  pricingRules PricingRule[]
+  shippingRules ShippingRule[]
+  quotes      Quote[]
+  createdAt   DateTime                       @default(now())
+  updatedAt   DateTime                       @updatedAt
+}
+
+model ProductParameterDefinition {
+  id               Int             @id @default(autoincrement())
+  productCategory  ProductCategory @relation(fields: [productCategoryId], references: [id])
+  productCategoryId Int
+  key              String
+  label            String
+  dataType         ParameterDataType @default(STRING)
+  required         Boolean         @default(false)
+  options          Json?            // optional enumerated values
+  example          String?
+  order           Int              @default(0)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@unique([productCategoryId, key])
+}
+
+enum ParameterDataType {
+  STRING
+  NUMBER
+  BOOLEAN
+  DATE
+  JSON
+}
+
+model PricingRule {
+  id              Int              @id @default(autoincrement())
+  productCategory ProductCategory   @relation(fields: [productCategoryId], references: [id])
+  productCategoryId Int
+  name            String
+  description     String?
+  ruleType        PricingRuleType  @default(BASE)
+  condition       Json?             // conditions in structured form
+  valueCents      Int
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+}
+
+enum PricingRuleType {
+  BASE
+  ADDITIONAL
+  DISCOUNT
+}
+
+model ShippingRule {
+  id              Int              @id @default(autoincrement())
+  productCategory ProductCategory?  @relation(fields: [productCategoryId], references: [id])
+  productCategoryId Int?
+  region          String            // region or zone
+  minWeightGrams  Int?              // minimum weight
+  maxWeightGrams  Int?              // maximum weight
+  costCents       Int
+  active          Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+}
+
+model HandoffRecord {
+  id             Int           @id @default(autoincrement())
+  conversation   Conversation  @relation(fields: [conversationId], references: [id])
+  conversationId Int
+  reason         String
+  assignedTo     String?
+  resolved       Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  resolvedAt     DateTime?
+}
+
+model FeedbackAnnotation {
+  id             Int          @id @default(autoincrement())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  conversationId Int
+  quote          Quote?       @relation(fields: [quoteId], references: [id])
+  quoteId        Int?
+  userType       FeedbackUserType
+  rating         Int?         // 1-5
+  comment        String?
+  createdAt      DateTime     @default(now())
+}
+
+enum FeedbackUserType {
+  CUSTOMER
+  AGENT
+  SYSTEM
+}
+

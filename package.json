@@ -1,0 +1,39 @@
+{
+  "name": "printing-ai-quote",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "prepare": "prisma generate",
+    "seed": "tsx prisma/seed.ts",
+    "test": "tsx src/server/pricing/albumQuote.test.ts",
+    "test:ai": "tsx src/server/ai/extractQuoteParams.test.ts",
+    "test:mvp": "tsx src/tests/mvp-regression.test.ts",
+    "test:pricing": "tsx src/tests/pricing-engines.test.ts",
+    "test:params": "tsx src/tests/parameter-merging.test.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "5.16.0",
+    "next": "14.2.5",
+    "openai": "^6.33.0",
+    "pg": "8.11.2",
+    "prisma": "5.16.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "zod": "3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.9",
+    "@types/react": "18.2.57",
+    "@types/react-dom": "18.2.19",
+    "autoprefixer": "10.4.19",
+    "dotenv": "16.3.1",
+    "postcss": "8.4.35",
+    "tailwindcss": "3.4.3",
+    "tsx": "3.13.0",
+    "typescript": "6.0.2"
+  }
+}
