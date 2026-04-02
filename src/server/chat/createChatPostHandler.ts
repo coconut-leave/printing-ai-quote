@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { extractQuoteParams } from '@/server/ai/extractQuoteParams'
+import { extractQuoteParams, type ExtractedQuoteParams } from '@/server/ai/extractQuoteParams'
 import { calculateAlbumQuote } from '@/server/pricing/albumQuote'
 import { calculateFlyerQuote } from '@/server/pricing/flyerQuote'
 import { calculateBusinessCardQuote } from '@/server/pricing/businessCardQuote'
@@ -110,9 +110,9 @@ function shouldResetQuoteContext(
 }
 
 function sanitizeExtractedParamsForRecommendation(
-  extractedParams: Record<string, any>,
+  extractedParams: ExtractedQuoteParams,
   latestRecommendedParams: { productType?: string } | null
-): Record<string, any> {
+) : ExtractedQuoteParams {
   if (!latestRecommendedParams?.productType || extractedParams.productType === undefined) {
     return extractedParams
   }
@@ -124,8 +124,7 @@ function sanitizeExtractedParamsForRecommendation(
     return extractedParams
   }
 
-  const sanitizedParams = { ...extractedParams }
-  delete sanitizedParams.productType
+  const { productType: _discardedProductType, ...sanitizedParams } = extractedParams
   return sanitizedParams
 }
 
@@ -715,7 +714,7 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
         })
       }
 
-      let currentExtracted = await deps.extractQuoteParams(payload.message)
+      let currentExtracted: ExtractedQuoteParams = await deps.extractQuoteParams(payload.message)
       timing.mark('params_extracted')
 
       if (!currentExtracted.productType && messageProductType) {
