@@ -1,5 +1,7 @@
 'use client'
 
+import Link from 'next/link'
+import { useParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { formatParamsByProduct, getMissingFieldsChineseText } from '@/lib/catalog/helpers'
 
@@ -84,16 +86,45 @@ function ParameterInfo({ message }: { message: any }) {
   )
 }
 
-export default function ConversationDetailPage({ params }: { params: { id: string } }) {
+export default function ConversationDetailPage() {
   const [conversation, setConversation] = useState<ConversationDetails | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [reflectionLoading, setReflectionLoading] = useState(false)
   const [reflectionIssueType, setReflectionIssueType] = useState<'PARAM_MISSING' | 'PARAM_WRONG' | 'QUOTE_INACCURATE' | 'SHOULD_HANDOFF'>('PARAM_WRONG')
   const [correctedParamsText, setCorrectedParamsText] = useState('')
   const [correctedQuoteSummary, setCorrectedQuoteSummary] = useState('')
 
-  const conversationId = Number(params.id)
+  const params = useParams<{ id: string | string[] }>()
+  const rawConversationId = Array.isArray(params?.id) ? params.id[0] : params?.id
+  const conversationId = Number(rawConversationId)
+
+  const loadConversation = async () => {
+    if (Number.isNaN(conversationId)) {
+      setError('无效的会话 ID')
+      setLoading(false)
+      return
+    }
+
+    try {
+      setError(null)
+      const res = await fetch(`/api/conversations/${conversationId}`, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setConversation(data.data)
+      } else {
+        setError(data.message || '获取会话详情失败')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (Number.isNaN(conversationId)) {
@@ -102,21 +133,8 @@ export default function ConversationDetailPage({ params }: { params: { id: strin
       return
     }
 
-    fetch(`/api/conversations/${conversationId}`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.ok) {
-          setConversation(data.data)
-        } else {
-          setError(data.message || '获取会话详情失败')
-        }
-      })
-      .catch(err => {
-        setError(err instanceof Error ? err.message : 'Unknown error')
-      })
-      .finally(() => {
-        setLoading(false)
-      })
+    setLoading(true)
+    void loadConversation()
   }, [conversationId])
 
   const handleGenerateReflection = async () => {
@@ -134,11 +152,13 @@ export default function ConversationDetailPage({ params }: { params: { id: strin
 
     setReflectionLoading(true)
     setError(null)
+    setSuccessMessage(null)
 
     try {
       const res = await fetch(`/api/conversations/${conversationId}/reflection`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({
           issueType: reflectionIssueType,
           correctedParams,
@@ -152,16 +172,10 @@ export default function ConversationDetailPage({ params }: { params: { id: strin
         return
       }
 
-      setConversation((prev) => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          reflections: [data.data, ...(prev.reflections || [])],
-        }
-      })
-
       setCorrectedParamsText('')
       setCorrectedQuoteSummary('')
+      setSuccessMessage(`Reflection #${data.data.id} 已创建，可前往 Reflections / Learning Dashboard 查看统计变化。`)
+      await loadConversation()
     } catch (err) {
       setError(err instanceof Error ? err.message : '生成反思记录失败')
     } finally {
@@ -186,9 +200,9 @@ export default function ConversationDetailPage({ params }: { params: { id: strin
           <div className='rounded bg-red-100 p-4 text-red-800'>
             <p>错误：{error}</p>
           </div>
-          <a href='/conversations' className='mt-4 inline-block text-blue-600 hover:underline'>
+          <Link href='/conversations' className='mt-4 inline-block text-blue-600 hover:underline'>
             返回会话列表
-          </a>
+          </Link>
         </div>
       </main>
     )
@@ -201,9 +215,9 @@ export default function ConversationDetailPage({ params }: { params: { id: strin
           <div className='rounded bg-yellow-100 p-4 text-yellow-800'>
             <p>会话不存在</p>
           </div>
-          <a href='/conversations' className='mt-4 inline-block text-blue-600 hover:underline'>
+          <Link href='/conversations' className='mt-4 inline-block text-blue-600 hover:underline'>
             返回会话列表
-          </a>
+          </Link>
         </div>
       </main>
     )
@@ -214,10 +228,24 @@ export default function ConversationDetailPage({ params }: { params: { id: strin
       <div className='mx-auto max-w-4xl space-y-6'>
         <div className='flex items-center justify-between'>
           <h1 className='text-2xl font-bold'>会话详情 #{conversation.id}</h1>
-          <a href='/conversations' className='text-blue-600 hover:underline'>
-            返回列表
-          </a>
+          <div className='flex gap-3 text-sm'>
+            <Link href='/conversations' className='text-blue-600 hover:underline'>
+              返回列表
+            </Link>
+            <Link href='/reflections' className='text-blue-600 hover:underline'>
+              查看 Reflections
+            </Link>
+            <Link href='/learning-dashboard' className='text-blue-600 hover:underline'>
+              查看 Learning Dashboard
+            </Link>
+          </div>
         </div>
+
+        {successMessage && (
+          <div className='rounded border border-green-200 bg-green-50 p-4 text-sm text-green-800'>
+            {successMessage}
+          </div>
+        )}
 
         {/* 会话基本信息 */}
         <div className='rounded-lg bg-white p-6 shadow'>
@@ -359,13 +387,17 @@ export default function ConversationDetailPage({ params }: { params: { id: strin
         {/* 反思记录 */}
         <div className='rounded-lg bg-white p-6 shadow'>
           <div className='mb-4 flex items-center justify-between'>
-            <h2 className='text-lg font-semibold'>反思记录 ({conversation.reflections?.length || 0})</h2>
+            <div>
+              <h2 className='text-lg font-semibold'>反思记录 ({conversation.reflections?.length || 0})</h2>
+              <p className='mt-1 text-sm text-slate-500'>在当前会话详情中可直接生成 Reflection，生成成功后可在 Reflections 与 Learning Dashboard 中继续查看。</p>
+            </div>
             <button
+              type='button'
               onClick={handleGenerateReflection}
               disabled={reflectionLoading}
               className='rounded bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50'
             >
-              {reflectionLoading ? '生成中...' : '生成反思记录'}
+              {reflectionLoading ? '生成中...' : '生成 Reflection'}
             </button>
           </div>
 

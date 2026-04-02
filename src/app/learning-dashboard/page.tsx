@@ -185,7 +185,10 @@ export default function LearningDashboardPage() {
   async function fetchStats() {
     try {
       setLoading(true)
-      const response = await fetch('/api/learning-dashboard')
+      const response = await fetch('/api/learning-dashboard', {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      })
       const data = await response.json()
       if (data.ok) {
         setStats(data.data)

@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { listConversations } from '@/server/db/conversations'
 import { withErrorHandler } from '@/server/api/response'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET() {
   return withErrorHandler(async () => {
     const conversations = await listConversations()

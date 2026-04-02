@@ -26,6 +26,8 @@ const testModules = [
   { name: '咨询到推荐到报价正式回归测试', file: 'src/tests/consultation-recommendation-quote-regression.test.ts' },
   { name: '推荐方案正式链路回归测试', file: 'src/tests/recommendation-flow-regression.test.ts' },
   { name: 'Chat API 推荐方案接续报价回归测试', file: 'src/tests/chat-api-recommendation-flow.test.ts' },
+  { name: 'Chat API 上下文隔离与短路回归测试', file: 'src/tests/chat-api-context-isolation.test.ts' },
+  { name: '会话详情与 Reflection 管理链路回归测试', file: 'src/tests/conversation-reflection-management.test.ts' },
 ]
 
 console.log('\n')

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getReflectionStats } from '@/server/db/conversations'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(request: Request) {
   try {
     const stats = await getReflectionStats()

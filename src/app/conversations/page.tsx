@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 
 type ConversationItem = {
@@ -21,7 +22,10 @@ export default function ConversationsPage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/conversations')
+      const res = await fetch('/api/conversations', {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      })
       const data = await res.json()
       if (data.ok) {
         setConversations(data.data)
@@ -66,9 +70,19 @@ export default function ConversationsPage() {
   return (
     <main className='min-h-screen bg-slate-50 p-4'>
       <div className='mx-auto max-w-4xl space-y-4'>
-        <h1 className='text-2xl font-bold'>
-          会话列表（最小版） - {filteredConversations.length} 个会话
-        </h1>
+        <div className='flex flex-wrap items-center justify-between gap-3'>
+          <h1 className='text-2xl font-bold'>
+            会话列表（最小版） - {filteredConversations.length} 个会话
+          </h1>
+          <div className='flex gap-2'>
+            <Link href='/reflections' className='rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50'>
+              查看 Reflections
+            </Link>
+            <Link href='/learning-dashboard' className='rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50'>
+              查看 Learning Dashboard
+            </Link>
+          </div>
+        </div>
 
         {/* 状态筛选 */}
         <div className='rounded-lg bg-white p-4 shadow'>
@@ -110,9 +124,14 @@ export default function ConversationsPage() {
 
         <div className='space-y-2'>
           {filteredConversations.map((c) => (
-            <div key={c.id} className='rounded border bg-white p-4 shadow'>
+            <div key={c.id} className='rounded border bg-white p-4 shadow transition-shadow hover:shadow-md'>
               <div className='mb-2 flex items-center justify-between gap-3'>
-                <div className='text-base font-semibold'>会话 #{c.id}</div>
+                <div>
+                  <Link href={`/conversations/${c.id}`} className='text-base font-semibold text-blue-700 hover:underline'>
+                    会话 #{c.id}
+                  </Link>
+                  <div className='mt-1 text-xs text-slate-500'>点击标题或下方按钮进入详情并生成 Reflection</div>
+                </div>
                 <div className='flex gap-2'>
                   <span className={`rounded px-2 py-1 text-xs font-medium ${
                     c.status === 'OPEN' ? 'bg-blue-100 text-blue-800' :
@@ -136,18 +155,18 @@ export default function ConversationsPage() {
               <p className='text-sm text-gray-500'>更新时间: {new Date(c.updatedAt).toLocaleString()}</p>
               <p className='mt-2 text-sm'>最新消息: {c.latestMessage || '暂无'}</p>
               <div className='mt-3 flex gap-2'>
+                <Link
+                  href={`/conversations/${c.id}`}
+                  className='rounded bg-blue-500 px-3 py-1 text-sm text-white hover:bg-blue-600'
+                >
+                  查看详情 / 生成 Reflection
+                </Link>
                 <button
                   className='rounded bg-orange-500 px-3 py-1 text-sm text-white hover:bg-orange-600'
                   onClick={() => handleHandoff(c.id)}
                 >
                   标记为人工接管
                 </button>
-                <a
-                  href={`/conversations/${c.id}`}
-                  className='rounded bg-blue-500 px-3 py-1 text-sm text-white hover:bg-blue-600'
-                >
-                  查看详情
-                </a>
               </div>
             </div>
           ))}

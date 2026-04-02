@@ -3,6 +3,8 @@ import { createErrorResponse, withErrorHandler, ErrorCode } from '@/server/api/r
 import { createReflectionRecord, getConversationWithDetails } from '@/server/db/conversations'
 import { generateReflection, ReflectionIssueType } from '@/server/learning/generateReflection'
 
+export const dynamic = 'force-dynamic'
+
 const ISSUE_TYPES: ReflectionIssueType[] = ['PARAM_MISSING', 'PARAM_WRONG', 'QUOTE_INACCURATE', 'SHOULD_HANDOFF']
 
 function isObject(value: unknown): value is Record<string, any> {

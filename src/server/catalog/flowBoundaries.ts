@@ -157,7 +157,7 @@ export function isImmediateHandoffIntent(intent: ChatIntent): boolean {
 }
 
 export function isNonQuoteFlowIntent(intent: ChatIntent): boolean {
-  return !isPricingRoutingIntent(intent) && intent !== 'RECOMMENDATION_CONFIRMATION'
+  return intent === 'PROGRESS_INQUIRY' || (!isPricingRoutingIntent(intent) && intent !== 'RECOMMENDATION_CONFIRMATION')
 }
 
 export function canKnowledgeIntentOfferRecommendation(intent: ChatIntent): boolean {

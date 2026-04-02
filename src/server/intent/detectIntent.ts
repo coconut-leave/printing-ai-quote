@@ -58,6 +58,7 @@ const BARGAIN_KEYWORDS = [
 ]
 const QUOTE_KEYWORDS = ['报价', '价格', '多少钱', '怎么卖', '什么价', '询价', '核价']
 const PRODUCT_KEYWORDS = ['画册', '册子', 'brochure', 'album', '传单', 'flyer', '名片', '海报', 'poster']
+const NEW_QUOTE_STARTER_KEYWORDS = ['我想印', '想印', '要印', '帮我报价', '给我报个价', '报个价', '重新报价', '重新核价']
 const MATERIAL_KEYWORDS = ['铜版纸', '哑粉', '哑粉纸', '哑光纸', '艺术纸', '双胶纸', '白卡', '纸张', '克重']
 const PROCESS_KEYWORDS = ['骑马钉', '胶装', '锁线', '精装', '装订', '覆膜', '烫金', 'uv', '工艺']
 const SPEC_KEYWORDS = ['a3', 'a4', 'a5', '尺寸', '规格', '多少页', '页数', '90x54', '名片尺寸']
@@ -108,6 +109,24 @@ function includesAny(text: string, keywords: string[]): boolean {
   return keywords.some((keyword) => text.includes(keyword))
 }
 
+export function extractExplicitProductType(text: string): 'album' | 'flyer' | 'business_card' | 'poster' | undefined {
+  const normalizedText = text.trim().toLowerCase()
+
+  if (normalizedText.includes('名片')) return 'business_card'
+  if (normalizedText.includes('海报') || normalizedText.includes('poster')) return 'poster'
+  if (normalizedText.includes('传单') || normalizedText.includes('flyer')) return 'flyer'
+  if (
+    normalizedText.includes('画册') ||
+    normalizedText.includes('册子') ||
+    normalizedText.includes('brochure') ||
+    normalizedText.includes('album')
+  ) {
+    return 'album'
+  }
+
+  return undefined
+}
+
 function looksLikeParameterSupplement(text: string): boolean {
   const hasDigits = /\d/.test(text)
   const hasParamWords = includesAny(text, PARAM_HINT_KEYWORDS)
@@ -120,6 +139,12 @@ function hasCompleteQuoteSignal(text: string): boolean {
   const hasQuantityOrSpec = /\d+\s*(本|张|份|页|mm|cm|g|克)/.test(text) || includesAny(text, ['数量', '尺寸', '成品'])
   const hasQuoteKeyword = includesAny(text, QUOTE_KEYWORDS)
   return (hasProduct && hasQuantityOrSpec) || (hasProduct && hasQuoteKeyword)
+}
+
+export function looksLikeFreshQuoteRequest(text: string): boolean {
+  const normalizedText = text.trim().toLowerCase()
+  const hasProduct = includesAny(normalizedText, PRODUCT_KEYWORDS)
+  return hasCompleteQuoteSignal(normalizedText) || (hasProduct && includesAny(normalizedText, NEW_QUOTE_STARTER_KEYWORDS))
 }
 
 function looksLikeConsultation(text: string): boolean {
@@ -174,22 +199,6 @@ function looksLikeRecommendationConfirmation(text: string): boolean {
 export function detectIntent(input: DetectIntentInput): DetectIntentResult {
   const text = input.message.trim().toLowerCase()
 
-  if (input.hasRecommendedParams && looksLikeRecommendationReselection(text)) {
-    if (includesAny(text, BARGAIN_KEYWORDS)) {
-      return { intent: 'BARGAIN_REQUEST', reason: 'recommendation_reselection_budget_detected' }
-    }
-
-    return { intent: 'SOLUTION_RECOMMENDATION', reason: 'recommendation_reselection_detected' }
-  }
-
-  if (input.hasRecommendedParams && looksLikeRecommendationConfirmation(text)) {
-    return { intent: 'RECOMMENDATION_CONFIRMATION', reason: 'recommendation_confirmation_detected' }
-  }
-
-  if (input.hasRecommendedParams && looksLikeParameterSupplement(text) && !looksLikeConsultation(text)) {
-    return { intent: 'PARAM_SUPPLEMENT', reason: 'recommendation_patch_like_message' }
-  }
-
   if (includesAny(text, FILE_KEYWORDS)) {
     return { intent: 'FILE_REVIEW_REQUEST', reason: 'file_keywords_detected' }
   }
@@ -208,6 +217,14 @@ export function detectIntent(input: DetectIntentInput): DetectIntentResult {
 
   if (includesAny(text, SAMPLE_KEYWORDS)) {
     return { intent: 'SAMPLE_REQUEST', reason: 'sample_keywords_detected' }
+  }
+
+  if (input.hasRecommendedParams && looksLikeRecommendationReselection(text)) {
+    if (includesAny(text, BARGAIN_KEYWORDS)) {
+      return { intent: 'BARGAIN_REQUEST', reason: 'recommendation_reselection_budget_detected' }
+    }
+
+    return { intent: 'SOLUTION_RECOMMENDATION', reason: 'recommendation_reselection_detected' }
   }
 
   if (includesAny(text, BARGAIN_KEYWORDS)) {
@@ -230,6 +247,18 @@ export function detectIntent(input: DetectIntentInput): DetectIntentResult {
     if ((includesAny(text, SPEC_KEYWORDS) || includesAny(text, PRODUCT_KEYWORDS)) && looksLikeConsultation(text)) {
       return { intent: 'SPEC_RECOMMENDATION', reason: 'spec_recommendation_detected' }
     }
+  }
+
+  if (looksLikeFreshQuoteRequest(text)) {
+    return { intent: 'QUOTE_REQUEST', reason: 'fresh_quote_request_detected' }
+  }
+
+  if (input.hasRecommendedParams && looksLikeRecommendationConfirmation(text)) {
+    return { intent: 'RECOMMENDATION_CONFIRMATION', reason: 'recommendation_confirmation_detected' }
+  }
+
+  if (input.hasRecommendedParams && looksLikeParameterSupplement(text) && !looksLikeConsultation(text)) {
+    return { intent: 'PARAM_SUPPLEMENT', reason: 'recommendation_patch_like_message' }
   }
 
   if (

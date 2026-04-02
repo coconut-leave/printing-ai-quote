@@ -83,6 +83,14 @@ test('PARAM_SUPPLEMENT: 推荐方案上下文中的 patch 型补充', () => {
   assert(result.intent === 'PARAM_SUPPLEMENT', '应识别为 PARAM_SUPPLEMENT')
 })
 
+test('QUOTE_REQUEST: 推荐方案上下文中的新询价起手式不应被误判为 patch', () => {
+  const result = detectIntent({
+    message: '我想印A4画册1000本',
+    hasRecommendedParams: true,
+  })
+  assert(result.intent === 'QUOTE_REQUEST', '新的询价起手式应识别为 QUOTE_REQUEST')
+})
+
 test('RECOMMENDATION_CONFIRMATION: 推荐方案上下文中的明确报价触发', () => {
   const result = detectIntent({
     message: '现在算一下',
@@ -175,9 +183,25 @@ test('PROGRESS_INQUIRY: 进度咨询', () => {
   assert(result.intent === 'PROGRESS_INQUIRY', '应识别为 PROGRESS_INQUIRY')
 })
 
+test('PROGRESS_INQUIRY: 推荐上下文中的进度问题不应进入确认报价', () => {
+  const result = detectIntent({
+    message: '现在进度怎么样',
+    hasRecommendedParams: true,
+  })
+  assert(result.intent === 'PROGRESS_INQUIRY', '推荐上下文中的进度问题应识别为 PROGRESS_INQUIRY')
+})
+
 test('MATERIAL_CONSULTATION: 纸张材料咨询不应误判为报价', () => {
   const result = detectIntent({ message: '157g 和 200g 铜版纸有什么区别？' })
   assert(result.intent === 'MATERIAL_CONSULTATION', '应识别为 MATERIAL_CONSULTATION')
+})
+
+test('MATERIAL_CONSULTATION: 推荐上下文中的材料咨询也应优先咨询 hard-stop', () => {
+  const result = detectIntent({
+    message: '铜版纸怎么卖',
+    hasRecommendedParams: true,
+  })
+  assert(result.intent === 'MATERIAL_CONSULTATION', '推荐上下文中的材料咨询应继续识别为 MATERIAL_CONSULTATION')
 })
 
 test('PROCESS_CONSULTATION: 装订工艺咨询', () => {

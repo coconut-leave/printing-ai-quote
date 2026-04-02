@@ -71,7 +71,10 @@ export default function ReflectionsPage() {
       })
       if (statusFilter !== 'ALL') params.set('status', statusFilter)
       if (issueTypeFilter !== 'ALL') params.set('issueType', issueTypeFilter)
-      const res = await fetch(`/api/reflections?${params.toString()}`)
+      const res = await fetch(`/api/reflections?${params.toString()}`, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      })
       const data = await res.json()
       if (data.ok) {
         setRecords(data.data.records)
@@ -86,7 +89,10 @@ export default function ReflectionsPage() {
 
   async function fetchStats() {
     try {
-      const res = await fetch('/api/reflections/stats')
+      const res = await fetch('/api/reflections/stats', {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      })
       const data = await res.json()
       if (data.ok) {
         setStats(data.data)
@@ -102,6 +108,7 @@ export default function ReflectionsPage() {
       const res = await fetch(`/api/reflections/${reflectionId}/review`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({ status: newStatus }),
       })
 

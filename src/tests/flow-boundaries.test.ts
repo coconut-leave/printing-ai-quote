@@ -69,6 +69,10 @@ test('报价主链路 intent 不应被归为非报价流', () => {
   assert(!isNonQuoteFlowIntent('RECOMMENDATION_CONFIRMATION'), '推荐确认不应落入非报价流')
 })
 
+test('进度查询应作为强制短路流处理', () => {
+  assert(isNonQuoteFlowIntent('PROGRESS_INQUIRY'), '进度查询应直接走非报价短路流')
+})
+
 console.log('\n=== 测试总结 ===\n')
 const passed = results.filter((r) => r.passed).length
 const total = results.length

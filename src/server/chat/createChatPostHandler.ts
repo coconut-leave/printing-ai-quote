@@ -25,7 +25,7 @@ import {
   getRequiredFields,
   isEstimatedAllowed,
 } from '@/lib/catalog/helpers'
-import { detectIntent, getIntentPlaceholderReply } from '@/server/intent/detectIntent'
+import { detectIntent, extractExplicitProductType, getIntentPlaceholderReply, looksLikeFreshQuoteRequest } from '@/server/intent/detectIntent'
 import { applyRecommendedPatch } from '@/server/intent/applyRecommendedPatch'
 import { buildRecommendationRerequestMessage } from '@/server/intent/applyRecommendedPatch'
 import { handleLightweightBusinessIntent } from '@/server/intent/handleIntent'
@@ -33,6 +33,119 @@ import { handleConsultationIntent } from '@/server/intent/handleConsultation'
 import { buildRecommendationBaseParams, getLatestRecommendedParams } from '@/server/intent/recommendationContext'
 import { canPatchRecommendation, isImmediateHandoffIntent, isNonQuoteFlowIntent } from '@/server/catalog/flowBoundaries'
 import { decideQuotePath } from '@/server/quote/workflowPolicy'
+
+const KNOWN_QUOTE_PARAM_FIELDS = [
+  'productType',
+  'finishedSize',
+  'quantity',
+  'coverPaper',
+  'coverWeight',
+  'innerPaper',
+  'innerWeight',
+  'bindingType',
+  'pageCount',
+  'paperType',
+  'paperWeight',
+  'printSides',
+  'finishType',
+  'lamination',
+  'taxRate',
+  'shippingRegion',
+]
+
+function hasExplicitProductSwitch(text: string): boolean {
+  const normalizedText = text.trim().toLowerCase()
+  const messageProductType = extractExplicitProductType(normalizedText)
+  if (!messageProductType) {
+    return false
+  }
+
+  return ['改成', '改为', '换成', '换做', '改做', '做成'].some((keyword) => normalizedText.includes(keyword))
+}
+
+function sanitizeQuoteParams(params: Record<string, any>): Record<string, any> {
+  const normalizedProductType = typeof params.productType === 'string'
+    ? normalizeProductType(params.productType)
+    : undefined
+
+  const allowedFields = normalizedProductType
+    ? new Set(['productType', ...getProductSchema(normalizedProductType).supportedFields])
+    : new Set(KNOWN_QUOTE_PARAM_FIELDS)
+
+  const sanitizedParams: Record<string, any> = {}
+  for (const field of allowedFields) {
+    if (params[field] !== undefined && params[field] !== null) {
+      sanitizedParams[field] = params[field]
+    }
+  }
+
+  return sanitizedParams
+}
+
+function getActiveContextProductType(
+  historicalParams: Record<string, any> | null,
+  latestRecommendedParams: { productType?: string } | null
+): string | undefined {
+  if (typeof latestRecommendedParams?.productType === 'string') {
+    return normalizeProductType(latestRecommendedParams.productType)
+  }
+
+  if (typeof historicalParams?.productType === 'string') {
+    return normalizeProductType(historicalParams.productType)
+  }
+
+  return undefined
+}
+
+function shouldResetQuoteContext(
+  message: string,
+  messageProductType: string | undefined,
+  contextProductType: string | undefined
+): boolean {
+  const normalizedText = message.trim().toLowerCase()
+  const hasFreshQuoteSignal = looksLikeFreshQuoteRequest(normalizedText)
+  const hasProductMismatch = Boolean(messageProductType && contextProductType && messageProductType !== contextProductType)
+
+  return hasFreshQuoteSignal || hasProductMismatch || hasExplicitProductSwitch(normalizedText)
+}
+
+function sanitizeExtractedParamsForRecommendation(
+  extractedParams: Record<string, any>,
+  latestRecommendedParams: { productType?: string } | null
+): Record<string, any> {
+  if (!latestRecommendedParams?.productType || extractedParams.productType === undefined) {
+    return extractedParams
+  }
+
+  const recommendationProductType = normalizeProductType(latestRecommendedParams.productType)
+  const extractedProductType = normalizeProductType(extractedParams.productType)
+
+  if (recommendationProductType === extractedProductType) {
+    return extractedParams
+  }
+
+  const sanitizedParams = { ...extractedParams }
+  delete sanitizedParams.productType
+  return sanitizedParams
+}
+
+function createTimingTracker(scope: string) {
+  const startedAt = Date.now()
+  const stages: Record<string, number> = {}
+
+  return {
+    mark(stage: string) {
+      stages[stage] = Date.now() - startedAt
+    },
+    flush(summary: { conversationId?: number; intent?: string; status?: string }) {
+      if (process.env.NODE_ENV === 'test') {
+        return
+      }
+
+      console.info(`[${scope}] timing ${JSON.stringify({ ...summary, totalMs: Date.now() - startedAt, stages })}`)
+    },
+  }
+}
 
 function buildDirectReplyGuide(missingFields: string[]): string {
   const samples = missingFields
@@ -378,6 +491,7 @@ type ChatRouteDeps = {
 export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams }) {
   return async function POST(request: Request) {
     return withErrorHandler(async () => {
+      const timing = createTimingTracker('chat-api')
       let payload: any
 
       try {
@@ -406,22 +520,40 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
         conversationId = conv.id
       }
 
+      const respond = (body: Record<string, any>) => {
+        timing.mark(`respond:${body.status ?? 'ok'}`)
+        timing.flush({
+          conversationId,
+          intent: typeof body.intent === 'string' ? body.intent : undefined,
+          status: typeof body.status === 'string' ? body.status : undefined,
+        })
+        return NextResponse.json(body)
+      }
+
       await addMessageToConversation(conversationId, 'CUSTOMER', payload.message)
 
-      const conversationDetails = await getConversationWithDetails(conversationId)
-
-      const historicalParams = payload.conversationId
-        ? await getLatestParametersForConversation(conversationId)
-        : null
+      const [conversationDetails, historicalParams] = await Promise.all([
+        getConversationWithDetails(conversationId),
+        payload.conversationId
+          ? getLatestParametersForConversation(conversationId)
+          : Promise.resolve(null),
+      ])
+      timing.mark('context_loaded')
 
       const latestRecommendedParams = getLatestRecommendedParams(conversationDetails)
+      const messageProductType = extractExplicitProductType(payload.message)
+      const activeContextProductType = getActiveContextProductType(historicalParams, latestRecommendedParams)
+      const resetQuoteContext = shouldResetQuoteContext(payload.message, messageProductType, activeContextProductType)
+      const activeHistoricalParams = resetQuoteContext ? null : historicalParams
+      const activeRecommendedParams = resetQuoteContext ? null : latestRecommendedParams
 
       const intentResult = detectIntent({
         message: payload.message,
         conversationStatus: existingConversation?.status,
-        hasHistoricalParams: Boolean(historicalParams),
-        hasRecommendedParams: Boolean(latestRecommendedParams),
+        hasHistoricalParams: Boolean(activeHistoricalParams),
+        hasRecommendedParams: Boolean(activeRecommendedParams),
       })
+      timing.mark('intent_detected')
 
       if (isImmediateHandoffIntent(intentResult.intent) && intentResult.intent !== 'COMPLAINT') {
         const reply = generateHandoffReply()
@@ -434,7 +566,7 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
           responseStatus: 'handoff_required',
         })
 
-        return NextResponse.json({
+        return respond({
           ok: true,
           status: 'handoff_required',
           intent: intentResult.intent,
@@ -455,7 +587,7 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
           responseStatus: 'handoff_required',
         })
 
-        return NextResponse.json({
+        return respond({
           ok: true,
           status: 'handoff_required',
           intent: intentResult.intent,
@@ -465,12 +597,34 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
         })
       }
 
-      const recommendationRerequest = latestRecommendedParams
-        ? buildRecommendationRerequestMessage(latestRecommendedParams, payload.message)
+      if (intentResult.intent === 'PROGRESS_INQUIRY') {
+        const progressResult = handleLightweightBusinessIntent(intentResult.intent, conversationDetails, payload.message)
+        const reply = progressResult?.reply || getIntentPlaceholderReply(intentResult.intent)
+        const responseStatus = progressResult?.status || 'progress_inquiry'
+        timing.mark('progress_short_circuit')
+
+        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+          intent: intentResult.intent,
+          intentReason: intentResult.reason,
+          responseStatus,
+        })
+
+        return respond({
+          ok: true,
+          status: responseStatus,
+          intent: intentResult.intent,
+          intentReason: intentResult.reason,
+          conversationId,
+          reply,
+        })
+      }
+
+      const recommendationRerequest = activeRecommendedParams
+        ? buildRecommendationRerequestMessage(activeRecommendedParams, payload.message)
         : null
 
       if (
-        latestRecommendedParams &&
+        activeRecommendedParams &&
         recommendationRerequest &&
         (intentResult.intent === 'SOLUTION_RECOMMENDATION' || intentResult.intent === 'BARGAIN_REQUEST')
       ) {
@@ -488,7 +642,7 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
             rerecommendationQuery: recommendationRerequest.query,
           })
 
-          return NextResponse.json({
+          return respond({
             ok: true,
             status: 'recommendation_updated',
             intent: intentResult.intent,
@@ -519,7 +673,7 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
           productType: consultationResult?.productType || recommendedParams?.productType,
         })
 
-        return NextResponse.json({
+        return respond({
           ok: true,
           status: responseStatus,
           intent: intentResult.intent,
@@ -551,7 +705,7 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
           responseStatus: 'handoff_required',
         })
 
-        return NextResponse.json({
+        return respond({
           ok: true,
           status: 'handoff_required',
           intent: intentResult.intent,
@@ -561,21 +715,34 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
         })
       }
 
-      const currentExtracted = await deps.extractQuoteParams(payload.message)
+      let currentExtracted = await deps.extractQuoteParams(payload.message)
+      timing.mark('params_extracted')
 
-      const recommendationPatchResult = latestRecommendedParams && (intentResult.intent === 'RECOMMENDATION_CONFIRMATION' || canPatchRecommendation(intentResult.intent))
-        ? applyRecommendedPatch(latestRecommendedParams, payload.message)
+      if (!currentExtracted.productType && messageProductType) {
+        currentExtracted = {
+          ...currentExtracted,
+          productType: messageProductType,
+        }
+      }
+
+      currentExtracted = activeRecommendedParams
+        ? sanitizeExtractedParamsForRecommendation(currentExtracted, activeRecommendedParams)
+        : currentExtracted
+
+      const recommendationPatchResult = activeRecommendedParams && (intentResult.intent === 'RECOMMENDATION_CONFIRMATION' || canPatchRecommendation(intentResult.intent))
+        ? applyRecommendedPatch(activeRecommendedParams, payload.message)
         : null
+      timing.mark('recommendation_patch_evaluated')
 
       const hasRecommendationPatch = Boolean(
         recommendationPatchResult && Object.keys(recommendationPatchResult.patchParams).length > 0
       )
 
-      if (intentResult.intent === 'PARAM_SUPPLEMENT' && latestRecommendedParams && hasRecommendationPatch) {
+      if (intentResult.intent === 'PARAM_SUPPLEMENT' && activeRecommendedParams && hasRecommendationPatch) {
         const updatedRecommendationPayload = {
-          productType: latestRecommendedParams.productType,
+          productType: activeRecommendedParams.productType,
           recommendedParams: recommendationPatchResult!.mergedRecommendedParams,
-          note: latestRecommendedParams.note,
+          note: activeRecommendedParams.note,
         }
         const reply = generateRecommendationUpdatedReply(recommendationPatchResult?.patchSummary)
 
@@ -589,7 +756,7 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
           patchSummary: recommendationPatchResult?.patchSummary,
         })
 
-        return NextResponse.json({
+        return respond({
           ok: true,
           status: 'recommendation_updated',
           intent: intentResult.intent,
@@ -603,24 +770,24 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
         })
       }
 
-      const recommendationBaseParams = latestRecommendedParams && (intentResult.intent === 'RECOMMENDATION_CONFIRMATION' || canPatchRecommendation(intentResult.intent))
-        ? buildRecommendationBaseParams(
+      const recommendationBaseParams = activeRecommendedParams && (intentResult.intent === 'RECOMMENDATION_CONFIRMATION' || canPatchRecommendation(intentResult.intent))
+        ? sanitizeQuoteParams(buildRecommendationBaseParams(
             recommendationPatchResult
               ? {
-                  productType: latestRecommendedParams.productType,
+                  productType: activeRecommendedParams.productType,
                   recommendedParams: recommendationPatchResult.mergedRecommendedParams,
-                  note: latestRecommendedParams.note,
+                  note: activeRecommendedParams.note,
                 }
-              : latestRecommendedParams,
-            historicalParams
-          )
+              : activeRecommendedParams,
+            activeHistoricalParams
+          ) || {})
         : null
 
-      let mergedParams: Record<string, any> = { ...currentExtracted }
+      let mergedParams: Record<string, any> = sanitizeQuoteParams({ ...currentExtracted })
       if (recommendationBaseParams) {
-        mergedParams = mergeParameters(recommendationBaseParams, currentExtracted)
-      } else if (historicalParams) {
-        mergedParams = mergeParameters(historicalParams, currentExtracted)
+        mergedParams = sanitizeQuoteParams(mergeParameters(recommendationBaseParams, currentExtracted))
+      } else if (activeHistoricalParams) {
+        mergedParams = sanitizeQuoteParams(mergeParameters(activeHistoricalParams, currentExtracted))
       }
 
       const missingFields = checkMissingFields(mergedParams)
@@ -630,6 +797,7 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
         productType: mergedParams.productType,
         missingFields,
       })
+      timing.mark('route_decided')
 
       if (routeDecision.status === 'handoff_required') {
         const reply = generateHandoffReply()
@@ -649,7 +817,7 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
           decision: routeDecision,
         })
 
-        return NextResponse.json({
+        return respond({
           ok: true,
           status: 'handoff_required',
           intent: intentResult.intent,
@@ -697,7 +865,7 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
             },
           })
 
-          return NextResponse.json({
+          return respond({
             ok: true,
             status: 'estimated',
             intent: intentResult.intent,
@@ -736,7 +904,7 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
           missingFields,
         })
 
-        return NextResponse.json({
+        return respond({
           ok: true,
           status: 'missing_fields',
           intent: intentResult.intent,
@@ -802,6 +970,7 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
           shippingRegion: mergedParams.shippingRegion ?? 'domestic',
         })
       }
+      timing.mark('pricing_completed')
 
       const reply = generateQuoteReply(quoteResult, productType)
 
@@ -842,7 +1011,7 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
         missingFields: [],
       })
 
-      return NextResponse.json({
+      return respond({
         ok: true,
         status: 'quoted',
         intent: intentResult.intent,
