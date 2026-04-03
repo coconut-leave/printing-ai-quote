@@ -4,6 +4,8 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { formatParamsByProduct, getMissingFieldsChineseText } from '@/lib/catalog/helpers'
+import { AdminPageNav } from '@/components/AdminPageNav'
+import { HandoffRequestPanel } from '@/components/HandoffRequestPanel'
 
 type ConversationDetails = {
   id: number
@@ -99,6 +101,10 @@ export default function ConversationDetailPage() {
   const params = useParams<{ id: string | string[] }>()
   const rawConversationId = Array.isArray(params?.id) ? params.id[0] : params?.id
   const conversationId = Number(rawConversationId)
+  const latestHandoff = conversation?.handoffs?.[0]
+  const latestCustomerMessage = conversation?.messages
+    ?.filter((message) => message.sender === 'CUSTOMER')
+    .slice(-1)[0]
 
   const loadConversation = async () => {
     if (Number.isNaN(conversationId)) {
@@ -226,6 +232,7 @@ export default function ConversationDetailPage() {
   return (
     <main className='min-h-screen bg-slate-50 p-4'>
       <div className='mx-auto max-w-4xl space-y-6'>
+        <AdminPageNav current='conversations' />
         <div className='flex items-center justify-between'>
           <h1 className='text-2xl font-bold'>会话详情 #{conversation.id}</h1>
           <div className='flex gap-3 text-sm'>
@@ -276,6 +283,30 @@ export default function ConversationDetailPage() {
               {new Date(conversation.updatedAt).toLocaleString()}
             </div>
           </div>
+
+          {(conversation.status === 'PENDING_HUMAN' || conversation.handoffs.length > 0) && (
+            <div className='mt-5 rounded-xl border border-orange-200 bg-orange-50 p-4'>
+              <div className='flex flex-col gap-3 md:flex-row md:items-start md:justify-between'>
+                <div>
+                  <p className='text-sm font-semibold text-orange-900'>人工处理入口</p>
+                  <p className='mt-1 text-sm text-orange-800'>
+                    当前会话已经存在人工处理状态或人工接管记录，可直接查看说明，必要时补充一条人工备注。
+                  </p>
+                </div>
+                <HandoffRequestPanel
+                  conversationId={conversation.id}
+                  statusLabel={conversation.status}
+                  summary={latestCustomerMessage?.content || `会话 #${conversation.id} 当前暂无客户摘要。`}
+                  reason={latestHandoff?.reason || '当前会话需要人工客服继续跟进。'}
+                  assignedTo={latestHandoff?.assignedTo || undefined}
+                  existingHandoffCount={conversation.handoffs.length}
+                  alreadyPending={conversation.status === 'PENDING_HUMAN'}
+                  triggerLabel='查看人工处理说明'
+                  onSubmitted={loadConversation}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 消息历史 */}

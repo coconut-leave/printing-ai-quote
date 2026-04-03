@@ -1,27 +1,33 @@
 'use client'
 
+import Link from 'next/link'
 import { useState } from 'react'
 import { FIELD_LABELS } from '@/lib/catalog/productSchemas'
 import { getDisplayParamEntries, getMissingFieldsChineseText } from '@/lib/catalog/helpers'
 import { buildHomeDemoViewModel } from '@/app/homeDemoView'
+import { HandoffRequestPanel } from '@/components/HandoffRequestPanel'
 
 export default function Home() {
   const [message, setMessage] = useState('')
   const [result, setResult] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [conversationId, setConversationId] = useState<number | null>(null)
+  const [lastCustomerMessage, setLastCustomerMessage] = useState('')
 
   const handleSend = async () => {
     if (!message.trim()) return
 
+    const currentMessage = message.trim()
+
     setLoading(true)
     setResult(null)
+    setLastCustomerMessage(currentMessage)
 
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, conversationId }),
+        body: JSON.stringify({ message: currentMessage, conversationId }),
       })
 
       const data = await response.json()
@@ -285,6 +291,7 @@ export default function Home() {
   const viewModel = buildHomeDemoViewModel(result)
   const recommendedParams = result?.recommendedParams?.recommendedParams
   const recommendedProductType = result?.recommendedParams?.productType || result?.mergedRecommendedParams?.productType
+  const handoffSummary = lastCustomerMessage || result?.reply || '当前会话已进入人工处理流程。'
   const examplePrompts = [
     '企业宣传册常见方案怎么配？',
     '开业活动传单预算有限，推荐一个经济方案',
@@ -468,6 +475,14 @@ export default function Home() {
                 <div className='rounded-lg border border-orange-200 bg-orange-50 p-4'>
                   <p className='font-semibold text-orange-900'>当前询价已经转入人工处理，后续会由人工团队继续核价和跟进。</p>
                 </div>
+                <HandoffRequestPanel
+                  conversationId={conversationId}
+                  statusLabel='待人工接管'
+                  summary={handoffSummary}
+                  reason={result.intentReason || result.reply}
+                  alreadyPending={true}
+                  triggerLabel='查看人工处理说明'
+                />
                 {renderParamSection('当前已整理的信息', result.mergedParams?.productType, result.mergedParams || result.mergedRecommendedParams, 'slate')}
               </div>
             )}
@@ -509,25 +524,25 @@ export default function Home() {
         <div className='rounded-2xl bg-white p-6 shadow'>
           <h2 className='mb-4 text-lg font-semibold'>快速入口</h2>
           <div className='grid grid-cols-2 gap-4'>
-            <a
+            <Link
               href='/dashboard'
               className='rounded bg-slate-800 px-4 py-3 text-center font-semibold text-white hover:bg-slate-900 transition-colors'
             >
               📊 Dashboard 总览
-            </a>
-            <a
+            </Link>
+            <Link
               href='/conversations'
               className='rounded bg-blue-500 px-4 py-3 text-center font-semibold text-white hover:bg-blue-600 transition-colors'
             >
               📋 会话列表
-            </a>
+            </Link>
             {conversationId && (
-              <a
+              <Link
                 href={`/conversations/${conversationId}`}
                 className='rounded bg-green-500 px-4 py-3 text-center font-semibold text-white hover:bg-green-600 transition-colors'
               >
                 📄 当前会话详情
-              </a>
+              </Link>
             )}
             {result?.status === 'quoted' && conversationId && (
               <div className='col-span-2 rounded border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700'>

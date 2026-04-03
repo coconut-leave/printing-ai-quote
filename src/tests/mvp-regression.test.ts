@@ -27,6 +27,9 @@ const testModules = [
   { name: '推荐方案正式链路回归测试', file: 'src/tests/recommendation-flow-regression.test.ts' },
   { name: 'Chat API 推荐方案接续报价回归测试', file: 'src/tests/chat-api-recommendation-flow.test.ts' },
   { name: 'Chat API 上下文隔离与短路回归测试', file: 'src/tests/chat-api-context-isolation.test.ts' },
+  { name: '轻量 Agent Router 与 RAG 回归测试', file: 'src/tests/agent-routing-rag.test.ts' },
+  { name: 'Router / RAG 命中日志回归测试', file: 'src/tests/router-rag-logging.test.ts' },
+  { name: 'Chat API 轻量 RAG 分流回归测试', file: 'src/tests/chat-api-rag-routing.test.ts' },
   { name: '会话详情与 Reflection 管理链路回归测试', file: 'src/tests/conversation-reflection-management.test.ts' },
 ]
 

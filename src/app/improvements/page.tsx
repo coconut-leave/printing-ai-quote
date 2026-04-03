@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { AdminPageNav } from '@/components/AdminPageNav'
 import type {
   ImprovementSuggestion,
   ImprovementSuggestionStatus,
@@ -159,6 +160,7 @@ export default function ImprovementsPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 py-8">
+        <AdminPageNav current='improvements' />
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">改进建议池</h1>

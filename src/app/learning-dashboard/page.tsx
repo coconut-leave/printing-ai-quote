@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { AdminPageNav } from '@/components/AdminPageNav'
 
 type DashboardResponse = {
   totals: {
@@ -203,6 +204,7 @@ export default function LearningDashboardPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto max-w-7xl px-4 py-8">
+        <AdminPageNav current='learning-dashboard' />
         <div className="mb-8 flex items-start justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Learning Dashboard</h1>

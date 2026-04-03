@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { extractQuoteParams, type ExtractedQuoteParams } from '@/server/ai/extractQuoteParams'
+import { routeMessage, type AgentRouteDecision } from '@/server/ai/routeMessage'
 import { calculateAlbumQuote } from '@/server/pricing/albumQuote'
 import { calculateFlyerQuote } from '@/server/pricing/flyerQuote'
 import { calculateBusinessCardQuote } from '@/server/pricing/businessCardQuote'
@@ -25,7 +26,7 @@ import {
   getRequiredFields,
   isEstimatedAllowed,
 } from '@/lib/catalog/helpers'
-import { detectIntent, extractExplicitProductType, getIntentPlaceholderReply, looksLikeFreshQuoteRequest } from '@/server/intent/detectIntent'
+import { detectIntent, extractExplicitProductType, getIntentPlaceholderReply, looksLikeFreshQuoteRequest, type DetectIntentResult } from '@/server/intent/detectIntent'
 import { applyRecommendedPatch } from '@/server/intent/applyRecommendedPatch'
 import { buildRecommendationRerequestMessage } from '@/server/intent/applyRecommendedPatch'
 import { handleLightweightBusinessIntent } from '@/server/intent/handleIntent'
@@ -33,6 +34,8 @@ import { handleConsultationIntent } from '@/server/intent/handleConsultation'
 import { buildRecommendationBaseParams, getLatestRecommendedParams } from '@/server/intent/recommendationContext'
 import { canPatchRecommendation, isImmediateHandoffIntent, isNonQuoteFlowIntent } from '@/server/catalog/flowBoundaries'
 import { decideQuotePath } from '@/server/quote/workflowPolicy'
+import { answerKnowledgeQuestion } from '@/server/rag/answerKnowledgeQuestion'
+import { getRequestTraceId, logRouterDispatch } from '@/server/logging/routerRagTrace'
 
 const KNOWN_QUOTE_PARAM_FIELDS = [
   'productType',
@@ -485,9 +488,37 @@ function generateRerecommendedReply(reply: string): string {
 
 type ChatRouteDeps = {
   extractQuoteParams: typeof extractQuoteParams
+  routeMessage: typeof routeMessage
+  answerKnowledgeQuestion: typeof answerKnowledgeQuestion
 }
 
-export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams }) {
+function mapAgentRouteToIntentResult(routeDecision: AgentRouteDecision): DetectIntentResult | null {
+  switch (routeDecision.intent) {
+    case 'FILE_BASED_INQUIRY':
+      return { intent: 'FILE_REVIEW_REQUEST', reason: routeDecision.reason }
+    case 'ASK_HUMAN':
+      return { intent: 'HUMAN_REQUEST', reason: routeDecision.reason }
+    case 'COMPLAINT_OR_RISK':
+      return { intent: 'COMPLAINT', reason: routeDecision.reason }
+    case 'ORDER_PROGRESS':
+      return { intent: 'PROGRESS_INQUIRY', reason: routeDecision.reason }
+    case 'PRICE_NEGOTIATION':
+      return { intent: 'BARGAIN_REQUEST', reason: routeDecision.reason }
+    default:
+      return null
+  }
+}
+
+export function createChatPostHandler(
+  deps: Partial<ChatRouteDeps> = {}
+) {
+  const resolvedDeps: ChatRouteDeps = {
+    extractQuoteParams,
+    routeMessage,
+    answerKnowledgeQuestion,
+    ...deps,
+  }
+
   return async function POST(request: Request) {
     return withErrorHandler(async () => {
       const timing = createTimingTracker('chat-api')
@@ -502,6 +533,8 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
       if (!payload.message || typeof payload.message !== 'string' || payload.message.trim().length === 0) {
         return createErrorResponse('消息内容不能为空', ErrorCode.VALIDATION_ERROR, 400)
       }
+
+      const requestId = getRequestTraceId(request)
 
       let conversationId: number
       let existingConversation: Awaited<ReturnType<typeof getConversationById>> | null = null
@@ -546,16 +579,126 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
       const activeHistoricalParams = resetQuoteContext ? null : historicalParams
       const activeRecommendedParams = resetQuoteContext ? null : latestRecommendedParams
 
-      const intentResult = detectIntent({
+      const agentRoute = await resolvedDeps.routeMessage({
+        message: payload.message,
+        conversationStatus: existingConversation?.status,
+        hasHistoricalParams: Boolean(activeHistoricalParams),
+        hasRecommendedParams: Boolean(activeRecommendedParams),
+      }, undefined, {
+        conversationId,
+        requestId,
+      })
+      timing.mark('agent_routed')
+
+      if (agentRoute.intent === 'KNOWLEDGE_QA' && agentRoute.shouldUseRAG) {
+        const knowledgeIntentResult = detectIntent({
+          message: payload.message,
+          conversationStatus: existingConversation?.status,
+          hasHistoricalParams: Boolean(activeHistoricalParams),
+          hasRecommendedParams: Boolean(activeRecommendedParams),
+        })
+        timing.mark('intent_detected')
+
+        const knowledgeAnswer = await resolvedDeps.answerKnowledgeQuestion(payload.message, {}, {
+          conversationId,
+          requestId,
+        })
+        timing.mark('rag_completed')
+
+        const consultationResult = isNonQuoteFlowIntent(knowledgeIntentResult.intent)
+          ? handleConsultationIntent(knowledgeIntentResult.intent, payload.message)
+          : null
+        const lightweightBusinessResult = handleLightweightBusinessIntent(
+          knowledgeIntentResult.intent,
+          conversationDetails,
+          payload.message
+        )
+        const recommendedParams = consultationResult?.recommendedParams || lightweightBusinessResult?.recommendedParams
+        const responseStatus = consultationResult?.status || lightweightBusinessResult?.status || 'knowledge_reply'
+        const responseIntent = consultationResult?.consultationIntent || knowledgeIntentResult.intent || 'KNOWLEDGE_QA'
+        const reply = consultationResult?.reply || lightweightBusinessResult?.reply || knowledgeAnswer.reply
+
+        logRouterDispatch({
+          conversationId,
+          requestId,
+          message: payload.message,
+          routerIntent: agentRoute.intent,
+          finalIntent: responseIntent,
+          branch: 'rag_consultation',
+          responseStatus,
+          usedRag: true,
+          executedQuoteEngine: false,
+          executedHandoff: false,
+          note: knowledgeAnswer.answerType,
+        })
+
+        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+          intent: responseIntent,
+          intentReason: knowledgeIntentResult.reason,
+          responseStatus,
+          agentRoute,
+          ragQuery: knowledgeAnswer.rewrittenQuery,
+          retrievedKnowledgeIds: knowledgeAnswer.snippets.map((snippet) => snippet.id),
+          conservativeRag: knowledgeAnswer.conservative,
+          recommendedParams,
+          consultationIntent: consultationResult?.consultationIntent,
+          matchedKnowledgeCardId: consultationResult?.matchedKnowledgeCardId,
+          matchedKnowledgeCardTitle: consultationResult?.matchedKnowledgeCardTitle,
+          consultationCategory: consultationResult?.consultationCategory,
+          hasRecommendedParams: consultationResult?.hasRecommendedParams,
+          productType: consultationResult?.productType || recommendedParams?.productType,
+        })
+
+        return respond({
+          ok: true,
+          status: responseStatus,
+          intent: responseIntent,
+          intentReason: knowledgeIntentResult.reason,
+          conversationId,
+          reply,
+          routeDecision: agentRoute,
+          ragQuery: knowledgeAnswer.rewrittenQuery,
+          retrievedKnowledge: knowledgeAnswer.snippets.map((snippet) => ({
+            id: snippet.id,
+            title: snippet.title,
+            source: snippet.source,
+          })),
+          conservativeRag: knowledgeAnswer.conservative,
+          recommendedParams,
+          consultationIntent: consultationResult?.consultationIntent,
+          matchedKnowledgeCardId: consultationResult?.matchedKnowledgeCardId,
+          matchedKnowledgeCardTitle: consultationResult?.matchedKnowledgeCardTitle,
+          consultationCategory: consultationResult?.consultationCategory,
+          hasRecommendedParams: consultationResult?.hasRecommendedParams,
+          productType: consultationResult?.productType || recommendedParams?.productType,
+        })
+      }
+
+      const detectedIntentResult = detectIntent({
         message: payload.message,
         conversationStatus: existingConversation?.status,
         hasHistoricalParams: Boolean(activeHistoricalParams),
         hasRecommendedParams: Boolean(activeRecommendedParams),
       })
+      const forcedIntentResult = mapAgentRouteToIntentResult(agentRoute)
+      const intentResult = forcedIntentResult || detectedIntentResult
       timing.mark('intent_detected')
 
       if (isImmediateHandoffIntent(intentResult.intent) && intentResult.intent !== 'COMPLAINT') {
         const reply = generateHandoffReply()
+
+        logRouterDispatch({
+          conversationId,
+          requestId,
+          message: payload.message,
+          routerIntent: agentRoute.intent,
+          finalIntent: intentResult.intent,
+          branch: 'handoff_required',
+          responseStatus: 'handoff_required',
+          usedRag: false,
+          executedHandoff: true,
+          executedQuoteEngine: false,
+        })
 
         await updateConversationStatus(conversationId, 'PENDING_HUMAN')
         await createHandoffRecord(conversationId, `intent:${intentResult.intent}`, 'sales_team')
@@ -577,6 +720,19 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
 
       if (intentResult.intent === 'COMPLAINT') {
         const reply = generateComplaintHandoffReply()
+
+        logRouterDispatch({
+          conversationId,
+          requestId,
+          message: payload.message,
+          routerIntent: agentRoute.intent,
+          finalIntent: intentResult.intent,
+          branch: 'complaint_handoff',
+          responseStatus: 'handoff_required',
+          usedRag: false,
+          executedHandoff: true,
+          executedQuoteEngine: false,
+        })
 
         await updateConversationStatus(conversationId, 'PENDING_HUMAN')
         await createHandoffRecord(conversationId, 'intent:COMPLAINT', 'service_team')
@@ -601,6 +757,19 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
         const reply = progressResult?.reply || getIntentPlaceholderReply(intentResult.intent)
         const responseStatus = progressResult?.status || 'progress_inquiry'
         timing.mark('progress_short_circuit')
+
+        logRouterDispatch({
+          conversationId,
+          requestId,
+          message: payload.message,
+          routerIntent: agentRoute.intent,
+          finalIntent: intentResult.intent,
+          branch: 'progress_short_circuit',
+          responseStatus,
+          usedRag: false,
+          executedHandoff: false,
+          executedQuoteEngine: false,
+        })
 
         await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
           intent: intentResult.intent,
@@ -632,6 +801,19 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
         if (rerecommended?.recommendedParams) {
           const reply = generateRerecommendedReply(rerecommended.reply)
 
+          logRouterDispatch({
+            conversationId,
+            requestId,
+            message: payload.message,
+            routerIntent: agentRoute.intent,
+            finalIntent: intentResult.intent,
+            branch: 'recommendation_rerequest',
+            responseStatus: 'recommendation_updated',
+            usedRag: false,
+            executedHandoff: false,
+            executedQuoteEngine: false,
+          })
+
           await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
             intent: intentResult.intent,
             intentReason: intentResult.reason,
@@ -659,6 +841,20 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
         const reply = consultationResult?.reply || lightweightBusinessResult?.reply || getIntentPlaceholderReply(intentResult.intent)
         const responseStatus = consultationResult?.status || lightweightBusinessResult?.status || 'intent_only'
         const recommendedParams = consultationResult?.recommendedParams || lightweightBusinessResult?.recommendedParams
+
+        logRouterDispatch({
+          conversationId,
+          requestId,
+          message: payload.message,
+          routerIntent: agentRoute.intent,
+          finalIntent: intentResult.intent,
+          branch: 'non_quote_flow',
+          responseStatus,
+          usedRag: false,
+          executedHandoff: false,
+          executedQuoteEngine: false,
+        })
+
         await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
           intent: intentResult.intent,
           intentReason: intentResult.reason,
@@ -698,6 +894,19 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
       if (earlyDecision.status === 'handoff_required') {
         const reply = generateHandoffReply()
 
+        logRouterDispatch({
+          conversationId,
+          requestId,
+          message: payload.message,
+          routerIntent: agentRoute.intent,
+          finalIntent: intentResult.intent,
+          branch: 'quote_policy_handoff',
+          responseStatus: 'handoff_required',
+          usedRag: false,
+          executedHandoff: true,
+          executedQuoteEngine: false,
+        })
+
         await updateConversationStatus(conversationId, 'PENDING_HUMAN')
         await createHandoffRecord(conversationId, '涉及设计文件或专业审稿需求', 'design_team')
         await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
@@ -714,7 +923,7 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
         })
       }
 
-      let currentExtracted: ExtractedQuoteParams = await deps.extractQuoteParams(payload.message)
+      let currentExtracted: ExtractedQuoteParams = await resolvedDeps.extractQuoteParams(payload.message)
       timing.mark('params_extracted')
 
       if (!currentExtracted.productType && messageProductType) {
@@ -744,6 +953,19 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
           note: activeRecommendedParams.note,
         }
         const reply = generateRecommendationUpdatedReply(recommendationPatchResult?.patchSummary)
+
+        logRouterDispatch({
+          conversationId,
+          requestId,
+          message: payload.message,
+          routerIntent: agentRoute.intent,
+          finalIntent: intentResult.intent,
+          branch: 'recommendation_patch_update',
+          responseStatus: 'recommendation_updated',
+          usedRag: false,
+          executedHandoff: false,
+          executedQuoteEngine: false,
+        })
 
         await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
           intent: intentResult.intent,
@@ -801,6 +1023,19 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
       if (routeDecision.status === 'handoff_required') {
         const reply = generateHandoffReply()
 
+        logRouterDispatch({
+          conversationId,
+          requestId,
+          message: payload.message,
+          routerIntent: agentRoute.intent,
+          finalIntent: intentResult.intent,
+          branch: 'route_decision_handoff',
+          responseStatus: 'handoff_required',
+          usedRag: false,
+          executedHandoff: true,
+          executedQuoteEngine: false,
+        })
+
         await updateConversationStatus(conversationId, 'PENDING_HUMAN')
         await createHandoffRecord(conversationId, '非标准或高风险询价，需人工接管', 'sales_team')
         await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
@@ -843,6 +1078,19 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
             estimated.missingHint,
             estimated.alternatives
           )
+
+          logRouterDispatch({
+            conversationId,
+            requestId,
+            message: payload.message,
+            routerIntent: agentRoute.intent,
+            finalIntent: intentResult.intent,
+            branch: 'estimated_quote',
+            responseStatus: 'estimated',
+            usedRag: false,
+            executedHandoff: false,
+            executedQuoteEngine: false,
+          })
 
           await updateConversationStatus(conversationId, 'MISSING_FIELDS')
           await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
@@ -888,6 +1136,19 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
         }
 
         const reply = generateMissingFieldsReplyByProduct(mergedParams.productType, missingFields)
+
+        logRouterDispatch({
+          conversationId,
+          requestId,
+          message: payload.message,
+          routerIntent: agentRoute.intent,
+          finalIntent: intentResult.intent,
+          branch: 'missing_fields',
+          responseStatus: 'missing_fields',
+          usedRag: false,
+          executedHandoff: false,
+          executedQuoteEngine: false,
+        })
 
         await updateConversationStatus(conversationId, 'MISSING_FIELDS')
         await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
@@ -970,6 +1231,19 @@ export function createChatPostHandler(deps: ChatRouteDeps = { extractQuoteParams
         })
       }
       timing.mark('pricing_completed')
+
+      logRouterDispatch({
+        conversationId,
+        requestId,
+        message: payload.message,
+        routerIntent: agentRoute.intent,
+        finalIntent: intentResult.intent,
+        branch: 'quoted',
+        responseStatus: 'quoted',
+        usedRag: false,
+        executedHandoff: false,
+        executedQuoteEngine: true,
+      })
 
       const reply = generateQuoteReply(quoteResult, productType)
 

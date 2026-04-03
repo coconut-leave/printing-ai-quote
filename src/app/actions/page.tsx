@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { AdminPageNav } from '@/components/AdminPageNav'
 
 type ActionItem = {
   id: string
@@ -165,6 +166,7 @@ export default function ActionsPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto max-w-7xl px-4 py-8">
+        <AdminPageNav current='actions' />
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-gray-900">建议落地工作台</h1>
           <p className="mt-2 text-gray-600">

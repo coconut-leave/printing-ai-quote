@@ -2,6 +2,8 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
+import { AdminPageNav } from '@/components/AdminPageNav'
+import { HandoffRequestPanel } from '@/components/HandoffRequestPanel'
 
 type ConversationItem = {
   id: number
@@ -39,24 +41,6 @@ export default function ConversationsPage() {
     }
   }
 
-  const handleHandoff = async (id: number) => {
-    try {
-      const res = await fetch(`/api/conversations/${id}/handoff`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: '人工接管', assignedTo: 'sales' }),
-      })
-      const data = await res.json()
-      if (data.ok) {
-        fetchConversations()
-      } else {
-        setError(data.message || '接管失败')
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error')
-    }
-  }
-
   // 筛选会话
   const filteredConversations = conversations.filter(c => {
     if (statusFilter === 'ALL') return true
@@ -70,6 +54,7 @@ export default function ConversationsPage() {
   return (
     <main className='min-h-screen bg-slate-50 p-4'>
       <div className='mx-auto max-w-4xl space-y-4'>
+        <AdminPageNav current='conversations' />
         <div className='flex flex-wrap items-center justify-between gap-3'>
           <h1 className='text-2xl font-bold'>
             会话列表（最小版） - {filteredConversations.length} 个会话
@@ -154,19 +139,23 @@ export default function ConversationsPage() {
               <p className='text-sm text-gray-500'>创建: {new Date(c.createdAt).toLocaleString()}</p>
               <p className='text-sm text-gray-500'>更新时间: {new Date(c.updatedAt).toLocaleString()}</p>
               <p className='mt-2 text-sm'>最新消息: {c.latestMessage || '暂无'}</p>
-              <div className='mt-3 flex gap-2'>
+              <div className='mt-3 flex flex-wrap gap-2'>
                 <Link
                   href={`/conversations/${c.id}`}
                   className='rounded bg-blue-500 px-3 py-1 text-sm text-white hover:bg-blue-600'
                 >
                   查看详情 / 生成 Reflection
                 </Link>
-                <button
-                  className='rounded bg-orange-500 px-3 py-1 text-sm text-white hover:bg-orange-600'
-                  onClick={() => handleHandoff(c.id)}
-                >
-                  标记为人工接管
-                </button>
+                <HandoffRequestPanel
+                  conversationId={c.id}
+                  statusLabel={c.status}
+                  summary={c.latestMessage || `会话 #${c.id} 当前暂无最新消息摘要。`}
+                  reason={c.status === 'PENDING_HUMAN' ? '当前会话已经处于人工处理状态。' : '需要人工客服继续跟进当前会话。'}
+                  existingHandoffCount={c.status === 'PENDING_HUMAN' ? 1 : 0}
+                  alreadyPending={c.status === 'PENDING_HUMAN'}
+                  triggerLabel={c.status === 'PENDING_HUMAN' ? '查看人工处理说明' : '提交给人工客服'}
+                  onSubmitted={fetchConversations}
+                />
               </div>
             </div>
           ))}
