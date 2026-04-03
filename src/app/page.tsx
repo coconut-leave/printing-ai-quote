@@ -509,11 +509,25 @@ export default function Home() {
               <summary className='cursor-pointer text-sm font-semibold text-slate-800'>查看调试信息</summary>
               <div className='mt-4 space-y-3'>
                 <div className='text-xs text-slate-500'>conversationId: {conversationId ?? '未创建'} / intent: {result.intent || '未识别'} / status: {result.status || 'unknown'}</div>
+                {renderKeyValueBlock('路由决策 routeDecision', result.routeDecision)}
                 {renderKeyValueBlock('推荐方案 recommendedParams', result.recommendedParams)}
                 {renderKeyValueBlock('本轮 patch 参数 patchParams', result.patchParams)}
                 {renderKeyValueBlock('当前方案 mergedRecommendedParams', result.mergedRecommendedParams)}
                 {renderKeyValueBlock('本轮抽取参数 extractedParams', result.extractedParams)}
                 {renderKeyValueBlock('合并后参数 mergedParams', result.mergedParams)}
+                {renderKeyValueBlock('最终缺失字段 missingFields', result.missingFields)}
+                {renderKeyValueBlock('知识问答 RAG 调试', (result.ragQuery || result.retrievedKnowledge || result.ragFallbackUsed !== undefined)
+                  ? {
+                      ragQuery: result.ragQuery,
+                      retrievedKnowledge: result.retrievedKnowledge,
+                      conservativeRag: result.conservativeRag,
+                      ragFallbackUsed: result.ragFallbackUsed,
+                      ragFallbackReason: result.ragFallbackReason,
+                      ragAnswerType: result.ragAnswerType,
+                      ragRewriteStrategy: result.ragRewriteStrategy,
+                      insufficientKnowledge: result.insufficientKnowledge,
+                    }
+                  : null)}
                 {renderKeyValueBlock('参考报价数据 estimatedData', result.estimatedData, 'text-amber-900')}
                 {renderKeyValueBlock('正式报价数据 data', result.data, 'text-green-700')}
               </div>

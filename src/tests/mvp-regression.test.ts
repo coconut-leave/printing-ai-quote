@@ -30,6 +30,7 @@ const testModules = [
   { name: '轻量 Agent Router 与 RAG 回归测试', file: 'src/tests/agent-routing-rag.test.ts' },
   { name: 'Router / RAG 命中日志回归测试', file: 'src/tests/router-rag-logging.test.ts' },
   { name: 'Chat API 轻量 RAG 分流回归测试', file: 'src/tests/chat-api-rag-routing.test.ts' },
+  { name: 'Reflection issueType 中文映射回归测试', file: 'src/tests/reflection-issue-type-labels.test.ts' },
   { name: '会话详情与 Reflection 管理链路回归测试', file: 'src/tests/conversation-reflection-management.test.ts' },
 ]
 

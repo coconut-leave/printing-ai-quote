@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { AdminPageNav } from '@/components/AdminPageNav'
+import { getReflectionIssueTypeLabel } from '@/lib/reflection/issueTypes'
 
 type DashboardResponse = {
   totals: {
@@ -130,13 +131,7 @@ type DashboardResponse = {
 }
 
 function formatIssueType(value: string) {
-  const map: Record<string, string> = {
-    PARAM_MISSING: '缺失参数',
-    PARAM_WRONG: '参数错误',
-    QUOTE_INACCURATE: '报价不准',
-    SHOULD_HANDOFF: '应转人工',
-  }
-  return map[value] || value
+  return getReflectionIssueTypeLabel(value)
 }
 
 function formatSuggestionType(value: string) {

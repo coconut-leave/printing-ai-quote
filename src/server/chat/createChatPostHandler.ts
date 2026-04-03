@@ -131,6 +131,17 @@ function sanitizeExtractedParamsForRecommendation(
   return sanitizedParams
 }
 
+function buildDebugExtractedParams(
+  extractedParams: ExtractedQuoteParams,
+  contextProductType?: string
+): Record<string, any> {
+  const normalizedProductType = normalizeProductType(extractedParams.productType || contextProductType)
+  return sanitizeQuoteParams({
+    ...(normalizedProductType ? { productType: normalizedProductType } : {}),
+    ...extractedParams,
+  })
+}
+
 function createTimingTracker(scope: string) {
   const startedAt = Date.now()
   const stages: Record<string, number> = {}
@@ -647,6 +658,11 @@ export function createChatPostHandler(
           consultationCategory: consultationResult?.consultationCategory,
           hasRecommendedParams: consultationResult?.hasRecommendedParams,
           productType: consultationResult?.productType || recommendedParams?.productType,
+          ragFallbackUsed: knowledgeAnswer.fallbackUsed,
+          ragFallbackReason: knowledgeAnswer.fallbackReason,
+          ragAnswerType: knowledgeAnswer.answerType,
+          ragRewriteStrategy: knowledgeAnswer.rewriteStrategy,
+          insufficientKnowledge: knowledgeAnswer.insufficientKnowledge,
         })
 
         return respond({
@@ -671,6 +687,11 @@ export function createChatPostHandler(
           consultationCategory: consultationResult?.consultationCategory,
           hasRecommendedParams: consultationResult?.hasRecommendedParams,
           productType: consultationResult?.productType || recommendedParams?.productType,
+          ragFallbackUsed: knowledgeAnswer.fallbackUsed,
+          ragFallbackReason: knowledgeAnswer.fallbackReason,
+          ragAnswerType: knowledgeAnswer.answerType,
+          ragRewriteStrategy: knowledgeAnswer.rewriteStrategy,
+          insufficientKnowledge: knowledgeAnswer.insufficientKnowledge,
         })
       }
 
@@ -1004,6 +1025,11 @@ export function createChatPostHandler(
           ) || {})
         : null
 
+      const debugExtractedParams = buildDebugExtractedParams(
+        currentExtracted,
+        recommendationBaseParams?.productType || activeRecommendedParams?.productType || activeHistoricalParams?.productType
+      )
+
       let mergedParams: Record<string, any> = sanitizeQuoteParams({ ...currentExtracted })
       if (recommendationBaseParams) {
         mergedParams = sanitizeQuoteParams(mergeParameters(recommendationBaseParams, currentExtracted))
@@ -1042,7 +1068,7 @@ export function createChatPostHandler(
           intent: intentResult.intent,
           intentReason: intentResult.reason,
           responseStatus: 'handoff_required',
-          extractedParams: currentExtracted,
+          extractedParams: debugExtractedParams,
           mergedParams,
           recommendationBaseParams,
           patchParams: recommendationPatchResult?.patchParams,
@@ -1058,7 +1084,7 @@ export function createChatPostHandler(
           intentReason: intentResult.reason,
           conversationId,
           reply,
-          extractedParams: currentExtracted,
+          extractedParams: debugExtractedParams,
           mergedParams,
           recommendationBaseParams,
           patchParams: recommendationPatchResult?.patchParams,
@@ -1097,7 +1123,7 @@ export function createChatPostHandler(
             intent: intentResult.intent,
             intentReason: intentResult.reason,
             responseStatus: 'estimated',
-            extractedParams: currentExtracted,
+            extractedParams: debugExtractedParams,
             mergedParams,
             recommendationBaseParams,
             patchParams: recommendationPatchResult?.patchParams,
@@ -1126,7 +1152,7 @@ export function createChatPostHandler(
               alternatives: estimated.alternatives,
             },
             missingFields,
-            extractedParams: currentExtracted,
+            extractedParams: debugExtractedParams,
             mergedParams,
             recommendationBaseParams,
             patchParams: recommendationPatchResult?.patchParams,
@@ -1155,7 +1181,7 @@ export function createChatPostHandler(
           intent: intentResult.intent,
           intentReason: intentResult.reason,
           responseStatus: 'missing_fields',
-          extractedParams: currentExtracted,
+          extractedParams: debugExtractedParams,
           mergedParams,
           recommendationBaseParams,
           patchParams: recommendationPatchResult?.patchParams,
@@ -1172,7 +1198,7 @@ export function createChatPostHandler(
           conversationId,
           missingFields,
           reply,
-          extractedParams: currentExtracted,
+          extractedParams: debugExtractedParams,
           mergedParams,
           recommendationBaseParams,
           patchParams: recommendationPatchResult?.patchParams,
@@ -1274,7 +1300,7 @@ export function createChatPostHandler(
         intent: intentResult.intent,
         intentReason: intentResult.reason,
         responseStatus: 'quoted',
-        extractedParams: currentExtracted,
+        extractedParams: debugExtractedParams,
         mergedParams,
         recommendationBaseParams,
         patchParams: recommendationPatchResult?.patchParams,
@@ -1292,7 +1318,7 @@ export function createChatPostHandler(
         conversationId,
         data: quoteResult,
         reply,
-        extractedParams: currentExtracted,
+        extractedParams: debugExtractedParams,
         mergedParams,
         recommendationBaseParams,
         patchParams: recommendationPatchResult?.patchParams,

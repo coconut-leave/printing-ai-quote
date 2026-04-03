@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { formatParamsByProduct, getMissingFieldsChineseText } from '@/lib/catalog/helpers'
 import { AdminPageNav } from '@/components/AdminPageNav'
 import { HandoffRequestPanel } from '@/components/HandoffRequestPanel'
+import { REFLECTION_ISSUE_TYPE_OPTIONS, getReflectionIssueTypeLabel, type ReflectionIssueType } from '@/lib/reflection/issueTypes'
 
 type ConversationDetails = {
   id: number
@@ -38,7 +39,7 @@ type ConversationDetails = {
   }>
   reflections: Array<{
     id: number
-    issueType: 'PARAM_MISSING' | 'PARAM_WRONG' | 'QUOTE_INACCURATE' | 'SHOULD_HANDOFF'
+    issueType: ReflectionIssueType
     reflectionText: string
     suggestionDraft: string
     status: 'NEW' | 'REVIEWED' | 'APPROVED' | 'REJECTED'
@@ -94,7 +95,7 @@ export default function ConversationDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [reflectionLoading, setReflectionLoading] = useState(false)
-  const [reflectionIssueType, setReflectionIssueType] = useState<'PARAM_MISSING' | 'PARAM_WRONG' | 'QUOTE_INACCURATE' | 'SHOULD_HANDOFF'>('PARAM_WRONG')
+  const [reflectionIssueType, setReflectionIssueType] = useState<ReflectionIssueType>('PARAM_WRONG')
   const [correctedParamsText, setCorrectedParamsText] = useState('')
   const [correctedQuoteSummary, setCorrectedQuoteSummary] = useState('')
 
@@ -440,10 +441,9 @@ export default function ConversationDetailPage() {
                 onChange={(e) => setReflectionIssueType(e.target.value as any)}
                 className='w-full rounded border px-3 py-2 text-sm'
               >
-                <option value='PARAM_MISSING'>PARAM_MISSING</option>
-                <option value='PARAM_WRONG'>PARAM_WRONG</option>
-                <option value='QUOTE_INACCURATE'>QUOTE_INACCURATE</option>
-                <option value='SHOULD_HANDOFF'>SHOULD_HANDOFF</option>
+                {REFLECTION_ISSUE_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
             </label>
 
@@ -473,7 +473,7 @@ export default function ConversationDetailPage() {
             {(conversation.reflections || []).map((item) => (
               <div key={item.id} className='rounded border p-4'>
                 <div className='mb-2 flex items-center justify-between'>
-                  <div className='text-sm font-medium'>#{item.id} {item.issueType}</div>
+                  <div className='text-sm font-medium'>#{item.id} {getReflectionIssueTypeLabel(item.issueType)}</div>
                   <span className='rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700'>
                     {item.status}
                   </span>

@@ -51,6 +51,40 @@ async function main() {
     assert(result.shouldRunQuoteEngine === true, '标准询价应继续走报价引擎')
   })
 
+  await test('模型误判 FILE 时，标准报价应回退到 QUOTE_REQUEST', async () => {
+    const result = await routeMessage(
+      {
+        message: '名片报价，90x54mm，300g铜版纸，双面',
+      },
+      {
+        callModel: async () => `{
+  "intent": "FILE_BASED_INQUIRY",
+  "confidence": 0.88,
+  "shouldUseRAG": false,
+  "shouldExtractParams": false,
+  "shouldRunQuoteEngine": false,
+  "shouldHandoff": true,
+  "shouldGenerateAlternativePlan": false,
+  "reason": "looks like design file quote"
+}`,
+      }
+    )
+
+    assert(result.intent === 'QUOTE_REQUEST', '标准规格化报价应回退到 QUOTE_REQUEST')
+    assert(result.shouldHandoff === false, '标准规格化报价不应被直接 handoff')
+    assert(result.shouldRunQuoteEngine === true, '标准规格化报价应继续走报价引擎')
+  })
+
+  await test('材质适配问题应路由到 KNOWLEDGE_QA', async () => {
+    const result = await routeMessage({
+      message: '商务名片用什么材质合适',
+    })
+
+    assert(result.intent === 'KNOWLEDGE_QA', '材质适配问题应进入 KNOWLEDGE_QA')
+    assert(result.shouldUseRAG === true, '材质适配问题应启用 RAG')
+    assert(result.shouldRunQuoteEngine === false, '知识问答不应进入报价引擎')
+  })
+
   await test('文件型询价应路由为 FILE_BASED_INQUIRY', async () => {
     const result = await routeMessage({
       message: '我有 PDF 设计稿，帮我看一下并报价',

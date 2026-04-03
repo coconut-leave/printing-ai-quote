@@ -2,7 +2,7 @@ import OpenAI from 'openai'
 import { z } from 'zod'
 import { buildAgentRouterPrompt } from '@/server/ai/prompts/agentRouter'
 import { isEnvVarConfigured, requireOpenAIKey } from '@/server/config/env'
-import { detectIntent, type DetectIntentInput } from '@/server/intent/detectIntent'
+import { detectIntent, hasStrongFileReviewSignal, looksLikeFreshQuoteRequest, type DetectIntentInput } from '@/server/intent/detectIntent'
 import { logRouterHit, type TraceContext } from '@/server/logging/routerRagTrace'
 
 export type AgentRouterIntent =
@@ -87,6 +87,15 @@ function extractJsonObject(text: string): string {
     : trimmed
   const match = unwrapped.match(/\{[\s\S]*\}/)
   return match ? match[0] : unwrapped
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(message)), timeoutMs)
+    }),
+  ])
 }
 
 function buildDecision(
@@ -177,6 +186,26 @@ function mapDetectedIntentToRoute(input: DetectIntentInput): AgentRouteDecision 
   }
 }
 
+function protectModelDecision(input: DetectIntentInput, decision: AgentRouteDecision): AgentRouteDecision {
+  const normalizedText = normalizeText(input.message)
+  const hasFileSignal = hasStrongFileReviewSignal(normalizedText)
+  const hasQuoteSignal = looksLikeFreshQuoteRequest(normalizedText)
+
+  if (decision.intent === 'FILE_BASED_INQUIRY' && !hasFileSignal) {
+    return mapDetectedIntentToRoute(input)
+  }
+
+  if (decision.shouldHandoff && decision.intent === 'FILE_BASED_INQUIRY' && hasQuoteSignal && !hasFileSignal) {
+    return mapDetectedIntentToRoute(input)
+  }
+
+  return decision
+}
+
+function isSameDecision(left: AgentRouteDecision, right: AgentRouteDecision): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
 async function classifyWithModel(input: DetectIntentInput, deps: RouteMessageDeps): Promise<AgentRouteDecision> {
   const prompt = buildAgentRouterPrompt(input)
   const text = deps.callModel
@@ -189,11 +218,15 @@ async function classifyWithModel(input: DetectIntentInput, deps: RouteMessageDep
 
 async function callModel(prompt: string): Promise<string> {
   const client = getOpenAIClient()
-  const response = await client.responses.create({
-    model: 'gpt-4o-mini',
-    input: prompt,
-    max_output_tokens: 220,
-  })
+  const response = await withTimeout(
+    client.responses.create({
+      model: 'gpt-4o-mini',
+      input: prompt,
+      max_output_tokens: 220,
+    }),
+    7000,
+    'Agent router timeout after 7 seconds'
+  )
 
   const output = response.output as any
   const text = output?.[0]?.text || output?.text || response.output_text
@@ -219,7 +252,9 @@ export async function routeMessageWithTrace(
 ): Promise<AgentRouteDecision> {
   if (deps.callModel || canUseRemoteModel()) {
     try {
-      const decision = await classifyWithModel(input, deps)
+      const modelDecision = await classifyWithModel(input, deps)
+      const decision = protectModelDecision(input, modelDecision)
+      const decisionWasGuarded = !isSameDecision(modelDecision, decision)
       logRouterHit({
         ...traceContext,
         message: input.message,
@@ -231,7 +266,8 @@ export async function routeMessageWithTrace(
         shouldHandoff: decision.shouldHandoff,
         shouldGenerateAlternativePlan: decision.shouldGenerateAlternativePlan,
         reason: decision.reason,
-        decisionSource: 'model',
+        decisionSource: decisionWasGuarded ? 'fallback_rule' : 'model',
+        fallbackReason: decisionWasGuarded ? 'model_decision_overridden_by_quote_guard' : undefined,
       })
       return decision
     } catch (error) {

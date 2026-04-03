@@ -44,7 +44,7 @@ const rewriteSchema = z.object({
   topics: z.array(z.string()).default([]),
 }).strict()
 
-const KNOWLEDGE_FALLBACK_REPLY = '这个问题更偏知识说明，但当前知识库里没有足够依据给出更确定的解释。您可以补充具体用途、材质或工艺场景；如果涉及复杂文件、特殊工艺或正式交期，请转人工确认。'
+const KNOWLEDGE_FALLBACK_REPLY = '这个问题更偏知识说明，但当前知识库里没有足够依据给出更确定的解释。您可以补充具体用途、材质或工艺场景；如果涉及复杂文件、特殊工艺或正式交期，请转人工确认。若您想按常见做法继续估价，也可以直接告诉我数量和规格。'
 
 let cachedOpenAIClient: OpenAI | null = null
 
@@ -81,6 +81,15 @@ function normalizeSearchQuery(message: string): string {
   return message.replace(/[？?！!。,.，]/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(message)), timeoutMs)
+    }),
+  ])
+}
+
 function buildDeterministicAnswer(snippets: KnowledgeSnippet[]): string {
   const body = snippets
     .slice(0, 2)
@@ -90,13 +99,17 @@ function buildDeterministicAnswer(snippets: KnowledgeSnippet[]): string {
   return `${body} 以上仅用于材料、工艺、装订、打样、交期等解释说明，不用于最终价格、税费或运费判断；如果涉及复杂文件、特殊工艺或正式交期，请以人工确认为准。`
 }
 
-async function callModel(prompt: string, maxOutputTokens: number): Promise<string> {
+async function callModel(prompt: string, maxOutputTokens: number, timeoutMs: number): Promise<string> {
   const client = getOpenAIClient()
-  const response = await client.responses.create({
-    model: 'gpt-4o-mini',
-    input: prompt,
-    max_output_tokens: maxOutputTokens,
-  })
+  const response = await withTimeout(
+    client.responses.create({
+      model: 'gpt-4o-mini',
+      input: prompt,
+      max_output_tokens: maxOutputTokens,
+    }),
+    timeoutMs,
+    `RAG model timeout after ${timeoutMs}ms`
+  )
 
   return extractResponseText(response)
 }
@@ -113,7 +126,7 @@ async function defaultRewriteQuery(message: string): Promise<RewriteKnowledgeQue
   }
 
   try {
-    const text = await callModel(buildRagQueryRewritePrompt(message), 180)
+    const text = await callModel(buildRagQueryRewritePrompt(message), 180, 7000)
     const parsed = JSON.parse(extractJsonObject(text))
     return {
       ...rewriteSchema.parse(parsed),
@@ -155,7 +168,7 @@ async function defaultGenerateAnswer(input: {
   }
 
   try {
-    const text = await callModel(buildRagAnswerPrompt(input), 360)
+    const text = await callModel(buildRagAnswerPrompt(input), 360, 9000)
     const cleaned = text.trim().replace(/^```(?:text)?\s*/i, '').replace(/\s*```$/, '')
     return {
       reply: cleaned || buildDeterministicAnswer(input.snippets),
@@ -180,7 +193,22 @@ export async function answerKnowledgeQuestion(
   const rewriteQuery = deps.rewriteQuery || defaultRewriteQuery
   const retrieve = deps.retrieveKnowledge || retrieveKnowledge
 
-  const rewrittenRaw = await rewriteQuery(message)
+  let rewrittenRaw: RewriteKnowledgeQueryResult
+  try {
+    rewrittenRaw = await withTimeout(
+      rewriteQuery(message),
+      7000,
+      'Knowledge rewrite timeout after 7 seconds'
+    )
+  } catch {
+    rewrittenRaw = {
+      searchQuery: normalizeSearchQuery(message),
+      topics: [],
+      rewriteStrategy: 'normalized_fallback',
+      fallbackUsed: true,
+      fallbackReason: 'rewrite_timeout',
+    }
+  }
   const rewritten: RewriteKnowledgeQueryResult = {
     ...rewrittenRaw,
     rewriteStrategy: rewrittenRaw.rewriteStrategy || (deps.rewriteQuery ? 'custom' : 'normalized_fallback'),
@@ -220,21 +248,39 @@ export async function answerKnowledgeQuestion(
     }
   }
 
-  const answerMeta = deps.generateAnswer
-    ? {
-        reply: await deps.generateAnswer({
-          message,
-          rewrittenQuery: rewritten.searchQuery,
-          snippets,
-        }),
-        fallbackUsed: false,
-        answerType: 'custom_answer' as const,
-      }
-    : await defaultGenerateAnswer({
-        message,
-        rewrittenQuery: rewritten.searchQuery,
-        snippets,
-      })
+  let answerMeta: GeneratedAnswerMeta
+  try {
+    answerMeta = deps.generateAnswer
+      ? {
+          reply: await withTimeout(
+            deps.generateAnswer({
+              message,
+              rewrittenQuery: rewritten.searchQuery,
+              snippets,
+            }),
+            9000,
+            'Knowledge answer timeout after 9 seconds'
+          ),
+          fallbackUsed: false,
+          answerType: 'custom_answer' as const,
+        }
+      : await withTimeout(
+          defaultGenerateAnswer({
+            message,
+            rewrittenQuery: rewritten.searchQuery,
+            snippets,
+          }),
+          9000,
+          'Knowledge answer timeout after 9 seconds'
+        )
+  } catch {
+    answerMeta = {
+      reply: buildDeterministicAnswer(snippets),
+      fallbackUsed: true,
+      fallbackReason: 'rag_answer_timeout',
+      answerType: 'deterministic_answer',
+    }
+  }
 
   const insufficientKnowledge = answerMeta.answerType === 'insufficient_knowledge'
 

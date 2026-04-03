@@ -51,6 +51,22 @@ test('RECOMMENDATION_CONFIRMATION: 咨询后直接按推荐方案报价', () => 
   assert(result.intent === 'RECOMMENDATION_CONFIRMATION', '应识别为 RECOMMENDATION_CONFIRMATION')
 })
 
+test('RECOMMENDATION_CONFIRMATION: 承接表达“按你推荐的来”应复用上一轮方案', () => {
+  const result = detectIntent({
+    message: '按你推荐的来',
+    hasRecommendedParams: true,
+  })
+  assert(result.intent === 'RECOMMENDATION_CONFIRMATION', '应识别为 RECOMMENDATION_CONFIRMATION')
+})
+
+test('RECOMMENDATION_CONFIRMATION: 承接表达“那就按这个做”应复用上一轮方案', () => {
+  const result = detectIntent({
+    message: '那就按这个做',
+    hasRecommendedParams: true,
+  })
+  assert(result.intent === 'RECOMMENDATION_CONFIRMATION', '应识别为 RECOMMENDATION_CONFIRMATION')
+})
+
 test('RECOMMENDATION_CONFIRMATION: 咨询后修改一个参数再报价', () => {
   const result = detectIntent({
     message: '改成胶装再报价',
@@ -168,6 +184,16 @@ test('FILE_REVIEW_REQUEST: 文件审稿请求', () => {
   assert(result.intent === 'FILE_REVIEW_REQUEST', '应识别为 FILE_REVIEW_REQUEST')
 })
 
+test('非 FILE_REVIEW_REQUEST: 标准名片报价不应误判为文件询价', () => {
+  const result = detectIntent({ message: '名片报价，90x54mm，300g铜版纸，双面' })
+  assert(result.intent === 'QUOTE_REQUEST', '标准名片报价应识别为 QUOTE_REQUEST')
+})
+
+test('非 FILE_REVIEW_REQUEST: 标准海报报价不应误判为文件询价', () => {
+  const result = detectIntent({ message: '海报报价，A2，157g铜版纸，100张' })
+  assert(result.intent === 'QUOTE_REQUEST', '标准海报报价应识别为 QUOTE_REQUEST')
+})
+
 test('HUMAN_REQUEST: 主动要求人工', () => {
   const result = detectIntent({ message: '帮我转人工客服' })
   assert(result.intent === 'HUMAN_REQUEST', '应识别为 HUMAN_REQUEST')
@@ -202,6 +228,11 @@ test('MATERIAL_CONSULTATION: 推荐上下文中的材料咨询也应优先咨询
     hasRecommendedParams: true,
   })
   assert(result.intent === 'MATERIAL_CONSULTATION', '推荐上下文中的材料咨询应继续识别为 MATERIAL_CONSULTATION')
+})
+
+test('MATERIAL_CONSULTATION: 商务名片材质问题应走知识咨询', () => {
+  const result = detectIntent({ message: '商务名片用什么材质合适' })
+  assert(result.intent === 'MATERIAL_CONSULTATION', '材质适配问题应识别为 MATERIAL_CONSULTATION')
 })
 
 test('PROCESS_CONSULTATION: 装订工艺咨询', () => {

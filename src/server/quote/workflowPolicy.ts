@@ -4,6 +4,7 @@ import {
   isEstimatedAllowed,
 } from '@/lib/catalog/helpers'
 import { normalizeProductType, ProductType } from '@/lib/catalog/productSchemas'
+import { hasStrongFileReviewSignal } from '@/server/intent/detectIntent'
 
 export type QuotePathStatus = 'quoted' | 'estimated' | 'handoff_required' | 'missing_fields'
 
@@ -11,11 +12,6 @@ export type WorkflowDecision = {
   status: QuotePathStatus
   reason: string
 }
-
-const FILE_BASED_KEYWORDS = [
-  'pdf', 'ai', 'cdr', 'psd', 'zip',
-  '附件', '设计稿', '文件发你了', '按文件报价', '审稿',
-]
 
 // MVP outside standard categories or complex packaging/material requests.
 const OUT_OF_SCOPE_KEYWORDS = [
@@ -28,8 +24,7 @@ function matchMissing(missingFields: string[], expected: string[]): boolean {
 }
 
 export function isFileBasedInquiry(message: string): boolean {
-  const lower = message.toLowerCase()
-  return FILE_BASED_KEYWORDS.some((keyword) => lower.includes(keyword))
+  return hasStrongFileReviewSignal(message)
 }
 
 export function isOutOfScopeInquiry(message: string): boolean {

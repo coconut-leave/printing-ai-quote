@@ -238,6 +238,29 @@ async function main() {
     assert(confirmation.mergedParams.quantity === 2000, '应合并当前消息数量')
   })
 
+  await test('经济方案推荐后按这个方案报价，应继承 flyer 推荐参数且只缺数量', async () => {
+    const consultation = await sendChat!({
+      message: '开业活动传单预算有限，推荐一个经济方案',
+    })
+
+    assert(Boolean(consultation.recommendedParams), '经济方案咨询应返回 recommendedParams')
+
+    const confirmation = await sendChat!({
+      conversationId: consultation.conversationId,
+      message: '按这个方案报价',
+    })
+
+    assert(confirmation.intent === 'RECOMMENDATION_CONFIRMATION', '承接报价应识别为 RECOMMENDATION_CONFIRMATION')
+    assert(confirmation.status === 'missing_fields', '未给数量时应进入 missing_fields')
+    assert(confirmation.mergedParams.productType === 'flyer', '应继承 flyer productType')
+    assert(confirmation.mergedParams.finishedSize === 'A5', '应继承经济方案尺寸 A5')
+    assert(confirmation.mergedParams.paperWeight === 128, '应继承经济方案克重 128g')
+    assert(confirmation.mergedParams.printSides === 'single', '应继承经济方案单面印刷')
+    assert(Array.isArray(confirmation.missingFields) && confirmation.missingFields.length === 1, '最终 missingFields 应只剩一个字段')
+    assert(confirmation.missingFields[0] === 'quantity', '最终应只缺 quantity')
+    assert(confirmation.extractedParams?.missingFields === undefined, '原始 extractedParams.missingFields 不应继续污染调试输出')
+  })
+
   await test('咨询后确认并修改一个参数，再进入报价链路', async () => {
     const consultation = await sendChat!({
       message: 'A4画册一般多少页比较合适？',

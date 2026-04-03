@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { AdminPageNav } from '@/components/AdminPageNav'
+import { REFLECTION_ISSUE_TYPE_OPTIONS, getReflectionIssueTypeLabel } from '@/lib/reflection/issueTypes'
 
 interface ReflectionRecord {
   id: number
@@ -146,16 +147,6 @@ export default function ReflectionsPage() {
     }
   }
 
-  const getIssueTypeLabel = (type: string) => {
-    const labels: Record<string, string> = {
-      PARAM_MISSING: '缺失参数',
-      PARAM_WRONG: '参数错误',
-      QUOTE_INACCURATE: '报价不准',
-      SHOULD_HANDOFF: '应转人工',
-    }
-    return labels[type] || type
-  }
-
   const getIssueTypeBadgeClass = (type: string) => {
     const baseClass = 'px-2 py-1 rounded text-xs font-medium'
     switch (type) {
@@ -211,10 +202,9 @@ export default function ReflectionsPage() {
               className="w-full rounded border border-gray-300 px-3 py-2"
             >
               <option value="ALL">全部</option>
-              <option value="PARAM_MISSING">PARAM_MISSING</option>
-              <option value="PARAM_WRONG">PARAM_WRONG</option>
-              <option value="QUOTE_INACCURATE">QUOTE_INACCURATE</option>
-              <option value="SHOULD_HANDOFF">SHOULD_HANDOFF</option>
+              {REFLECTION_ISSUE_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </label>
         </div>
@@ -256,7 +246,7 @@ export default function ReflectionsPage() {
                 {stats.issueTypeDistribution.map((item) => (
                   <div key={item.issueType} className="flex justify-between">
                     <span className="text-sm text-gray-600">
-                      {getIssueTypeLabel(item.issueType)}
+                      {getReflectionIssueTypeLabel(item.issueType)}
                     </span>
                     <span className="text-sm font-semibold text-gray-900">
                       {item._count}
@@ -375,7 +365,7 @@ export default function ReflectionsPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         <span className={getIssueTypeBadgeClass(record.issueType)}>
-                          {getIssueTypeLabel(record.issueType)}
+                          {getReflectionIssueTypeLabel(record.issueType)}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate">
