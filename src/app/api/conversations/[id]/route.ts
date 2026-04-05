@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { normalizeConversationDetailPayload } from '@/lib/admin/conversationDetail'
 import { getConversationWithDetails } from '@/server/db/conversations'
 import { createErrorResponse, withErrorHandler, ErrorCode } from '@/server/api/response'
 
@@ -16,6 +17,11 @@ export async function GET(request: Request, { params }: { params: { id: string }
       return createErrorResponse('会话不存在', ErrorCode.NOT_FOUND, 404)
     }
 
-    return NextResponse.json({ ok: true, data: conversation })
+    const normalizedConversation = normalizeConversationDetailPayload(conversation)
+    if (!normalizedConversation) {
+      return createErrorResponse('会话详情格式无效', ErrorCode.INTERNAL_ERROR, 500)
+    }
+
+    return NextResponse.json({ ok: true, data: normalizedConversation })
   }, 'conversation-detail')
 }

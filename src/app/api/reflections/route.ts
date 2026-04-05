@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAllReflections, getReflectionStats } from '@/server/db/conversations'
+import { REFLECTION_ISSUE_TYPES, isReflectionIssueType } from '@/lib/reflection/issueTypes'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,13 +20,13 @@ export async function GET(request: Request) {
     }
 
     const validStatuses = ['NEW', 'REVIEWED', 'APPROVED', 'REJECTED']
-    const validIssueTypes = ['PARAM_MISSING', 'PARAM_WRONG', 'QUOTE_INACCURATE', 'SHOULD_HANDOFF']
+    const validIssueTypes = REFLECTION_ISSUE_TYPES
 
     if (status && !validStatuses.includes(status)) {
       return NextResponse.json({ ok: false, error: 'Invalid status filter' }, { status: 400 })
     }
 
-    if (issueType && !validIssueTypes.includes(issueType)) {
+    if (issueType && (!isReflectionIssueType(issueType) || !validIssueTypes.includes(issueType))) {
       return NextResponse.json({ ok: false, error: 'Invalid issueType filter' }, { status: 400 })
     }
 

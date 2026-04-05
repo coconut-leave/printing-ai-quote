@@ -130,7 +130,7 @@ async function main() {
     })
 
     assert(result.conservative === true, '知识不足时应进入保守兜底')
-    assert(result.reply.includes('当前知识库里没有足够依据'), '应明确说明知识不足')
+    assert(result.reply.includes('现有资料还不够') || result.reply.includes('不够支撑更确定的结论'), '应明确说明知识不足')
   })
 
   console.log('\n=== 测试总结 ===\n')

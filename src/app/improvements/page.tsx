@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { AdminPageNav } from '@/components/AdminPageNav'
 import type {
+  ImprovementActionChangeType,
+  ImprovementDiffCategory,
   ImprovementSuggestion,
   ImprovementSuggestionStatus,
   ImprovementSuggestionType,
@@ -155,6 +157,55 @@ export default function ImprovementsPage() {
     }
   }
 
+  const getDiffCategoryLabel = (diffCategory?: ImprovementDiffCategory) => {
+    const labels: Record<ImprovementDiffCategory, string> = {
+      PARAM_RECOGNITION: '参数识别',
+      BUNDLE_STRUCTURE: '组合结构',
+      QUOTE_BOUNDARY: '报价边界',
+      REVIEW_POLICY: '复核策略',
+      PRICING_JUDGMENT: '报价判断',
+      OTHER: '其他',
+    }
+
+    return diffCategory ? labels[diffCategory] : ''
+  }
+
+  const getChangeTypeLabel = (changeType?: ImprovementActionChangeType) => {
+    switch (changeType) {
+      case 'prompt_update':
+        return '提示词更新'
+      case 'mapping_update':
+        return '字段映射更新'
+      case 'extraction_rule_update':
+        return '抽取规则更新'
+      case 'threshold_update':
+        return '阈值调整'
+      case 'policy_update':
+        return '策略调整'
+      case 'pricing_rule_review':
+        return '价格规则复核'
+      case 'test_only_update':
+        return '仅补测试'
+      case 'other_update':
+        return '其他变更'
+      default:
+        return ''
+    }
+  }
+
+  const getRiskLevelLabel = (riskLevel?: string) => {
+    switch (riskLevel) {
+      case 'LOW':
+        return '低风险'
+      case 'MEDIUM':
+        return '中风险'
+      case 'HIGH':
+        return '高风险'
+      default:
+        return ''
+    }
+  }
+
   const totalPages = Math.ceil(total / limit)
 
   return (
@@ -274,6 +325,11 @@ export default function ImprovementsPage() {
                         <div className="text-xs text-gray-500 line-clamp-1">
                           {improvement.summary}
                         </div>
+                        {improvement.contextSummary && (
+                          <div className="mt-2 text-xs text-slate-500 whitespace-pre-wrap">
+                            {improvement.contextSummary}
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         <Link
@@ -299,6 +355,73 @@ export default function ImprovementsPage() {
                           <div className="mt-2 p-2 bg-gray-100 rounded text-xs text-gray-700 whitespace-pre-wrap max-w-xs">
                             {improvement.suggestionDraft}
                           </div>
+                          {improvement.actionDraft && (
+                            <div className="mt-2 rounded bg-emerald-50 p-2 text-xs text-emerald-900 max-w-xs space-y-2">
+                              <div>
+                                <strong>Action Draft：</strong>
+                                <div className="mt-1 whitespace-pre-wrap">{improvement.actionDraft.actionTitle}</div>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <span className="rounded bg-emerald-100 px-2 py-1 font-medium text-emerald-800">
+                                  {improvement.actionDraft.targetArea}
+                                </span>
+                                <span className="rounded bg-white px-2 py-1 text-emerald-800">
+                                  {getChangeTypeLabel(improvement.actionDraft.changeType)}
+                                </span>
+                                <span className="rounded bg-white px-2 py-1 text-emerald-800">
+                                  {getRiskLevelLabel(improvement.actionDraft.riskLevel)}
+                                </span>
+                              </div>
+                              <div>
+                                <strong>实施说明：</strong>
+                                <div className="mt-1 whitespace-pre-wrap">{improvement.actionDraft.implementationNote}</div>
+                              </div>
+                              <div>
+                                <strong>测试提示：</strong>
+                                <div className="mt-1 whitespace-pre-wrap">{improvement.actionDraft.testHint}</div>
+                              </div>
+                            </div>
+                          )}
+                          {(improvement.issueSummary || improvement.diffCategory || improvement.whyItHappened || improvement.suggestedActionHint) && (
+                            <div className="mt-2 rounded bg-amber-50 p-2 text-xs text-amber-900 max-w-xs space-y-2">
+                              {improvement.issueSummary && (
+                                <div>
+                                  <strong>问题摘要：</strong>
+                                  <div className="mt-1 whitespace-pre-wrap">{improvement.issueSummary}</div>
+                                </div>
+                              )}
+                              <div className="flex flex-wrap gap-2">
+                                {improvement.diffCategory && (
+                                  <span className="rounded bg-amber-100 px-2 py-1 font-medium text-amber-800">
+                                    {getDiffCategoryLabel(improvement.diffCategory)}
+                                  </span>
+                                )}
+                                {typeof improvement.confidence === 'number' && (
+                                  <span className="rounded bg-white px-2 py-1 text-amber-800">
+                                    置信度 {(improvement.confidence * 100).toFixed(0)}%
+                                  </span>
+                                )}
+                              </div>
+                              {improvement.whyItHappened && (
+                                <div>
+                                  <strong>归因：</strong>
+                                  <div className="mt-1 whitespace-pre-wrap">{improvement.whyItHappened}</div>
+                                </div>
+                              )}
+                              {improvement.suggestedActionHint && (
+                                <div>
+                                  <strong>动作提示：</strong>
+                                  <div className="mt-1 whitespace-pre-wrap">{improvement.suggestedActionHint}</div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {improvement.contextSummary && (
+                            <div className="mt-2 p-2 bg-slate-50 rounded text-xs text-slate-600 whitespace-pre-wrap max-w-xs">
+                              <strong>包装上下文：</strong>
+                              <div className="mt-1">{improvement.contextSummary}</div>
+                            </div>
+                          )}
                           {improvement.correctedParams && (
                             <div className="mt-2 p-2 bg-gray-100 rounded text-xs text-gray-700">
                               <strong>修正参数：</strong>

@@ -6,9 +6,25 @@ import { AdminPageNav } from '@/components/AdminPageNav'
 type ActionItem = {
   id: string
   sourceReflectionId: number
+  issueType: string
   suggestionType: string
   impactArea: string
   suggestionDraft: string
+  actionDraft?: {
+    actionTitle: string
+    targetArea: string
+    changeType: string
+    targetFileHint?: string
+    implementationNote: string
+    testHint: string
+    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
+  }
+  issueSummary?: string
+  diffCategory?: string
+  confidence?: number
+  whyItHappened?: string
+  suggestedActionHint?: string
+  contextSummary?: string
   targetArea: string
   targetFileHint?: string
   implementationNote: string
@@ -39,6 +55,61 @@ export default function ActionsPage() {
     fetchActions()
     fetchStats()
   }, [targetAreaFilter])
+
+  function getDiffCategoryLabel(diffCategory?: string) {
+    switch (diffCategory) {
+      case 'PARAM_RECOGNITION':
+        return '参数识别'
+      case 'BUNDLE_STRUCTURE':
+        return '组合结构'
+      case 'QUOTE_BOUNDARY':
+        return '报价边界'
+      case 'REVIEW_POLICY':
+        return '复核策略'
+      case 'PRICING_JUDGMENT':
+        return '报价判断'
+      case 'OTHER':
+        return '其他'
+      default:
+        return ''
+    }
+  }
+
+  function getChangeTypeLabel(changeType?: string) {
+    switch (changeType) {
+      case 'prompt_update':
+        return '提示词更新'
+      case 'mapping_update':
+        return '字段映射更新'
+      case 'extraction_rule_update':
+        return '抽取规则更新'
+      case 'threshold_update':
+        return '阈值调整'
+      case 'policy_update':
+        return '策略调整'
+      case 'pricing_rule_review':
+        return '价格规则复核'
+      case 'test_only_update':
+        return '仅补测试'
+      case 'other_update':
+        return '其他变更'
+      default:
+        return ''
+    }
+  }
+
+  function getRiskLevelLabel(riskLevel?: string) {
+    switch (riskLevel) {
+      case 'LOW':
+        return '低风险'
+      case 'MEDIUM':
+        return '中风险'
+      case 'HIGH':
+        return '高风险'
+      default:
+        return ''
+    }
+  }
 
   async function fetchActions() {
     try {
@@ -255,14 +326,58 @@ export default function ActionsPage() {
                       <td className="px-4 py-4 text-sm text-gray-900">#{item.sourceReflectionId}</td>
                       <td className="px-4 py-4 text-sm text-gray-900">{item.suggestionType}</td>
                       <td className="px-4 py-4 text-sm text-gray-900">{item.impactArea}</td>
-                      <td className="px-4 py-4 text-sm text-gray-700 max-w-xs whitespace-pre-wrap">{item.suggestionDraft}</td>
+                      <td className="px-4 py-4 text-sm text-gray-700 max-w-xs whitespace-pre-wrap">
+                        {item.actionDraft && (
+                          <div className="mb-2 rounded bg-emerald-50 p-2 text-xs text-emerald-900 space-y-2">
+                            <div>
+                              <strong>Action Draft：</strong>
+                              <div className="mt-1">{item.actionDraft.actionTitle}</div>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <span className="rounded bg-emerald-100 px-2 py-1 font-medium text-emerald-800">
+                                {item.actionDraft.targetArea}
+                              </span>
+                              <span className="rounded bg-white px-2 py-1 text-emerald-800">
+                                {getChangeTypeLabel(item.actionDraft.changeType)}
+                              </span>
+                              <span className="rounded bg-white px-2 py-1 text-emerald-800">
+                                {getRiskLevelLabel(item.actionDraft.riskLevel)}
+                              </span>
+                            </div>
+                            <div><strong>测试提示：</strong>{item.actionDraft.testHint}</div>
+                          </div>
+                        )}
+                        <div>{item.suggestionDraft}</div>
+                        {(item.issueSummary || item.diffCategory || item.whyItHappened || item.suggestedActionHint) && (
+                          <div className="mt-2 rounded bg-amber-50 p-2 text-xs text-amber-900 space-y-2">
+                            {item.issueSummary && <div><strong>问题摘要：</strong>{item.issueSummary}</div>}
+                            <div className="flex flex-wrap gap-2">
+                              {item.diffCategory && (
+                                <span className="rounded bg-amber-100 px-2 py-1 font-medium text-amber-800">
+                                  {getDiffCategoryLabel(item.diffCategory)}
+                                </span>
+                              )}
+                              {typeof item.confidence === 'number' && (
+                                <span className="rounded bg-white px-2 py-1 text-amber-800">
+                                  置信度 {(item.confidence * 100).toFixed(0)}%
+                                </span>
+                              )}
+                            </div>
+                            {item.whyItHappened && <div><strong>归因：</strong>{item.whyItHappened}</div>}
+                            {item.suggestedActionHint && <div><strong>动作提示：</strong>{item.suggestedActionHint}</div>}
+                          </div>
+                        )}
+                        {item.contextSummary && (
+                          <div className="mt-2 text-xs text-slate-500 whitespace-pre-wrap">{item.contextSummary}</div>
+                        )}
+                      </td>
                       <td className="px-4 py-4 text-sm text-gray-900">{item.targetArea}</td>
                       <td className="px-4 py-4 text-sm text-gray-700">
                         <input
-                          defaultValue={item.targetFileHint || ''}
+                          defaultValue={item.targetFileHint || item.actionDraft?.targetFileHint || ''}
                           className="w-64 rounded border border-gray-300 p-2 text-xs"
                           onBlur={(e) => {
-                            if (e.target.value !== (item.targetFileHint || '')) {
+                            if (e.target.value !== (item.targetFileHint || item.actionDraft?.targetFileHint || '')) {
                               saveTargetFileHint(item.id, e.target.value)
                             }
                           }}
@@ -270,11 +385,11 @@ export default function ActionsPage() {
                       </td>
                       <td className="px-4 py-4 text-sm text-gray-700">
                         <textarea
-                          defaultValue={item.implementationNote}
+                          defaultValue={item.implementationNote || item.actionDraft?.implementationNote || ''}
                           rows={4}
                           className="w-72 rounded border border-gray-300 p-2 text-xs"
                           onBlur={(e) => {
-                            if (e.target.value !== item.implementationNote) {
+                            if (e.target.value !== (item.implementationNote || item.actionDraft?.implementationNote || '')) {
                               saveImplementationNote(item.id, e.target.value)
                             }
                           }}

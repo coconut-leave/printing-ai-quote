@@ -9,11 +9,14 @@ type AdminPageNavProps = {
 const NAV_ITEMS = [
   { href: '/', label: '返回对话页', key: 'home' },
   { href: '/conversations', label: '返回会话列表', key: 'conversations' },
-  { href: '/dashboard', label: '返回 Dashboard', key: 'dashboard' },
-  { href: '/reflections', label: 'Reflections', key: 'reflections' },
-  { href: '/improvements', label: 'Improvements', key: 'improvements' },
-  { href: '/actions', label: 'Actions', key: 'actions' },
-  { href: '/learning-dashboard', label: 'Learning Dashboard', key: 'learning-dashboard' },
+  { href: '/dashboard', label: '运营看板', key: 'dashboard' },
+  { href: '/reflections', label: '反思记录', key: 'reflections' },
+  { href: '/improvements', label: '改进建议', key: 'improvements' },
+  { href: '/actions', label: '执行动作', key: 'actions' },
+  { href: '/action-draft-dashboard', label: '动作草案看板', key: 'action-draft-dashboard' },
+  { href: '/governance-dashboard', label: '治理看板', key: 'governance-dashboard' },
+  { href: '/governance-effectiveness', label: '治理效果', key: 'governance-effectiveness' },
+  { href: '/learning-dashboard', label: '学习看板', key: 'learning-dashboard' },
 ]
 
 export function AdminPageNav({ current }: AdminPageNavProps) {

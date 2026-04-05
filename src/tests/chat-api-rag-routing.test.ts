@@ -187,18 +187,19 @@ async function main() {
 
     assert(response.status === 'consultation_reply', '知识问题应保留 consultation_reply 兼容响应')
     assert(response.intent === 'PROCESS_CONSULTATION', '工艺解释问题应保留 PROCESS_CONSULTATION intent')
+    assert(response.reply.includes('骑马钉') || response.reply.includes('按这个方案报价'), '知识回复应保留更自然的客服口吻')
     assert(ragCallCount === 1, '应调用 RAG 回答器')
     assert(extractCallCount === 0, '知识问题不应进入抽参')
   })
 
-  await test('标准询价不应误走 RAG', async () => {
+  await test('简单印刷询价不应误走 RAG，并应转入 handoff_required', async () => {
     resetCounts()
 
     const response = await sendChat!({
       message: '我想印1000本A4画册，报价',
     })
 
-    assert(response.status === 'quoted', '标准询价应继续进入报价链路')
+    assert(response.status === 'handoff_required', '简单印刷询价应进入 handoff_required')
     assert(ragCallCount === 0, '标准询价不应调用 RAG')
     assert(extractCallCount === 1, '标准询价应继续抽参')
   })
@@ -211,6 +212,7 @@ async function main() {
     })
 
     assert(response.status === 'handoff_required', '文件型询价应继续 handoff')
+    assert(response.reply.includes('抱歉') || response.reply.includes('人工'), 'handoff 回复应使用新的自然中文兜底话术')
     assert(ragCallCount === 0, '文件型询价不应调用 RAG')
     assert(extractCallCount === 0, '文件型询价不应进入抽参')
   })

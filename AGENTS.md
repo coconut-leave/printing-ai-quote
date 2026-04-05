@@ -4,7 +4,7 @@
 This project is an MVP for an AI quoting assistant for a printing factory selling on 1688/Alibaba.
 
 Main goal:
-- Handle standard printing inquiries
+- Handle simple printing inquiries and phase-one complex packaging pre-quote inquiries
 - Extract quote parameters from user messages
 - Use a structured pricing engine to calculate quotes
 - Answer basic printing/production questions
@@ -13,7 +13,8 @@ Main goal:
 
 ## MVP scope
 Current MVP only focuses on:
-- Standard product categories
+- Simple product categories
+- Phase-one complex packaging categories as structured pre-quote + human review
 - Multi-turn parameter collection
 - Structured quote calculation
 - Basic FAQ / knowledge retrieval
@@ -24,16 +25,17 @@ Current MVP only focuses on:
 Not in current MVP:
 - Fully automatic negotiation
 - Automatic review of complex design files
+- Stable automatic parsing of dieline PDFs / AI / CDR files
 - Full ERP integration
 - Full 1688 production integration
-- All non-standard packaging products
+- Full non-standard packaging quote automation
 - Complex after-sales automation
 
 ## Core product rules
 1. LLM must never calculate final prices directly.
 2. All prices must come from a structured pricing engine.
 3. RAG / knowledge retrieval is only for explanatory knowledge, not final pricing.
-4. If user sends complex design files (PDF/AI/CDR/PSD/ZIP), default action is human handoff.
+4. If user sends complex design files (PDF/AI/CDR/PSD/ZIP) or dieline files, default action is human handoff / manual review.
 5. If required parameters are missing, system should ask follow-up questions instead of guessing.
 6. If the request is outside standard rules, hand off to human.
 7. Do not implement simulated login, scraping, or unofficial 1688 automation.
@@ -47,11 +49,19 @@ Current live scope in this repository:
 - Business card
 - Poster
 
+Phase-one complex packaging direction:
+- Mailer box
+- Tuck end box
+- Window box
+- Leaflet insert
+- Box insert
+- Seal sticker
+
 Planned but not yet implemented in the current codebase:
 - Sticker
 - Standard paper bag
 
-Do not expand categories unless explicitly asked.
+Do not expand categories beyond the lists above unless explicitly asked.
 
 ## Architecture principles
 - Frontend: Next.js

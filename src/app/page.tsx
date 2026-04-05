@@ -5,7 +5,9 @@ import { useState } from 'react'
 import { FIELD_LABELS } from '@/lib/catalog/productSchemas'
 import { getDisplayParamEntries, getMissingFieldsChineseText } from '@/lib/catalog/helpers'
 import { buildHomeDemoViewModel } from '@/app/homeDemoView'
+import { HOME_EXAMPLE_GROUPS } from '@/app/homeExamplePrompts'
 import { HandoffRequestPanel } from '@/components/HandoffRequestPanel'
+import type { PackagingReviewSummaryView } from '@/lib/packaging/reviewSummary'
 
 export default function Home() {
   const [message, setMessage] = useState('')
@@ -262,8 +264,8 @@ export default function Home() {
         <h3 className={`mb-3 text-base font-bold ${currentTone.title}`}>{title}</h3>
         <div className={`space-y-2 font-mono text-sm ${currentTone.text}`}>
           <div className='flex justify-between'>
-            <span>单价</span>
-            <span>¥{quoteData.unitPrice}</span>
+            <span>{quoteData.isBundle ? '组合单套价' : '单价'}</span>
+            <span>¥{quoteData.totalUnitPrice ?? quoteData.unitPrice}</span>
           </div>
           <div className='flex justify-between'>
             <span>产品小计</span>
@@ -288,25 +290,186 @@ export default function Home() {
     )
   }
 
+  const renderBundleItems = (quoteData: any) => {
+    if (!Array.isArray(quoteData?.items) || quoteData.items.length === 0) return null
+
+    return (
+      <div className='rounded-lg border border-slate-200 bg-slate-50 p-4'>
+        <h3 className='mb-3 text-base font-bold text-slate-900'>组合报价明细</h3>
+        <div className='space-y-3'>
+          {quoteData.items.map((item: any, index: number) => (
+            <div key={`${item.itemType}-${index}`} className='rounded-lg bg-white p-3'>
+              <div className='mb-2 flex items-center justify-between gap-3'>
+                <p className='font-semibold text-slate-900'>{item.title}</p>
+                <p className='text-sm font-mono text-slate-700'>¥{item.unitPrice} / 件</p>
+              </div>
+              <p className='text-sm text-slate-600'>小计：¥{item.totalPrice}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  const renderReferenceFiles = (files: Array<{ fileName: string; fileUrl: string; fileCategory: string }> | undefined) => {
+    if (!Array.isArray(files) || files.length === 0) return null
+
+    return (
+      <div className='rounded-lg border border-slate-200 bg-slate-50 p-4'>
+        <h3 className='mb-3 text-base font-bold text-slate-900'>参考文件</h3>
+        <div className='space-y-2'>
+          {files.map((file) => (
+            <a
+              key={file.fileUrl}
+              href={file.fileUrl}
+              target='_blank'
+              rel='noreferrer'
+              className='flex items-center justify-between rounded bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-100'
+            >
+              <span>{file.fileName}</span>
+              <span className='text-xs uppercase tracking-wide text-slate-500'>{file.fileCategory}</span>
+            </a>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  const renderPackagingReview = (summary: PackagingReviewSummaryView | null | undefined) => {
+    if (!summary) return null
+
+    return (
+      <div className='rounded-lg border border-slate-200 bg-white p-4'>
+        <div className='flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-3'>
+          <div>
+            <h3 className='text-base font-bold text-slate-900'>包装报价说明</h3>
+            <p className='mt-1 text-sm text-slate-700'>{summary.statusReasonText}</p>
+            {summary.conciseExplanation && (
+              <p className='mt-1 text-sm text-slate-600'>{summary.conciseExplanation}</p>
+            )}
+          </div>
+          <div className='rounded-full bg-slate-900 px-3 py-1 text-sm font-semibold text-white'>
+            {summary.statusLabel}
+          </div>
+        </div>
+
+        <div className='mt-4 grid gap-3 md:grid-cols-2'>
+          <div className='rounded-lg bg-slate-50 p-3 text-sm text-slate-700'>
+            <p className='font-semibold text-slate-900'>整体结果</p>
+            <div className='mt-2 space-y-1'>
+              {summary.mainItem && <div>主件：{summary.mainItem.title}</div>}
+              {summary.subItems.length > 0 && <div>配套件：{summary.subItems.map((item) => item.title).join('、')}</div>}
+              {typeof summary.subtotal === 'number' && <div>产品小计：¥{summary.subtotal}</div>}
+              {typeof summary.shippingFee === 'number' && <div>运费：¥{summary.shippingFee}</div>}
+              {typeof summary.finalPrice === 'number' && <div>最终价格：¥{summary.finalPrice}</div>}
+              {typeof summary.totalUnitPrice === 'number' && <div>{summary.lineItems.length > 1 ? '组合单套价' : '总单价'}：¥{summary.totalUnitPrice}</div>}
+            </div>
+          </div>
+
+          {(summary.reviewReasons.length > 0 || summary.reviewFlags.length > 0) && (
+            <div className='rounded-lg bg-amber-50 p-3 text-sm text-amber-900'>
+              <p className='font-semibold'>复核原因</p>
+              <div className='mt-2 space-y-1'>
+                {summary.reviewReasons.map((reason) => (
+                  <div key={`${reason.code}-${reason.itemTitle || 'overall'}`}>{reason.label}：{reason.message}</div>
+                ))}
+                {summary.reviewReasons.length === 0 && summary.reviewFlags.map((flag) => (
+                  <div key={flag}>{flag}</div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {summary.missingDetails.length > 0 && (
+          <div className='mt-4 rounded-lg bg-yellow-50 p-3 text-sm text-yellow-900'>
+            <p className='font-semibold'>仍待补充</p>
+            <div className='mt-2 space-y-1'>
+              {summary.missingDetails.map((detail) => (
+                <div key={`${detail.itemIndex}-${detail.productType}`}>{detail.itemLabel}：{detail.fieldsText}</div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className='mt-4 space-y-3'>
+          {summary.lineItems.map((item, index) => (
+            <div key={`${item.itemType}-${index}`} className='rounded-lg bg-slate-50 p-3'>
+              <div className='flex flex-wrap items-start justify-between gap-3'>
+                <div>
+                  <p className='font-semibold text-slate-900'>{item.title}</p>
+                  <p className='text-sm text-slate-600'>{item.normalizedSpecSummary}</p>
+                </div>
+                <div className='text-right text-sm text-slate-700'>
+                  <div>数量：{item.quantity}</div>
+                  <div>单价：¥{item.unitPrice}</div>
+                  <div>小计：¥{item.lineTotal}</div>
+                </div>
+              </div>
+              <div className='mt-3 grid gap-2 text-sm text-slate-700 md:grid-cols-2'>
+                <div>材质 / 克重：{item.materialWeightSummary}</div>
+                <div>印色：{item.printColorSummary}</div>
+                <div>工艺：{item.processSummary}</div>
+                <div>开机费：¥{item.setupCost} / 运行费：¥{item.runCost}</div>
+              </div>
+              {(item.reviewReasons.length > 0 || item.reviewFlags.length > 0) && (
+                <div className='mt-3 rounded bg-amber-100 px-3 py-2 text-sm text-amber-900'>
+                  {(item.reviewReasons.length > 0 ? item.reviewReasons.map((reason) => reason.message) : item.reviewFlags).join('；')}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   const viewModel = buildHomeDemoViewModel(result)
   const recommendedParams = result?.recommendedParams?.recommendedParams
   const recommendedProductType = result?.recommendedParams?.productType || result?.mergedRecommendedParams?.productType
   const handoffSummary = lastCustomerMessage || result?.reply || '当前会话已进入人工处理流程。'
-  const examplePrompts = [
-    '企业宣传册常见方案怎么配？',
-    '开业活动传单预算有限，推荐一个经济方案',
-    '商务名片用什么材质更合适？',
-    '我想印1000本A4画册，封面200g铜版纸，内页157g铜版纸，骑马钉',
-  ]
+  const exampleGroupToneMap = {
+    recommendation: {
+      card: 'border-sky-200 bg-sky-50',
+      badge: 'bg-sky-900 text-white',
+      title: 'text-sky-950',
+      text: 'text-sky-800',
+      button: 'border-sky-200 bg-white text-sky-900 hover:bg-sky-100',
+    },
+    quoted: {
+      card: 'border-emerald-200 bg-emerald-50',
+      badge: 'bg-emerald-900 text-white',
+      title: 'text-emerald-950',
+      text: 'text-emerald-800',
+      button: 'border-emerald-200 bg-white text-emerald-900 hover:bg-emerald-100',
+    },
+    estimated: {
+      card: 'border-amber-200 bg-amber-50',
+      badge: 'bg-amber-900 text-white',
+      title: 'text-amber-950',
+      text: 'text-amber-800',
+      button: 'border-amber-200 bg-white text-amber-900 hover:bg-amber-100',
+    },
+    handoff: {
+      card: 'border-rose-200 bg-rose-50',
+      badge: 'bg-rose-900 text-white',
+      title: 'text-rose-950',
+      text: 'text-rose-800',
+      button: 'border-rose-200 bg-white text-rose-900 hover:bg-rose-100',
+    },
+  } as const
 
   return (
     <main className='min-h-screen bg-slate-100 p-4'>
       <div className='mx-auto max-w-3xl space-y-6'>
         <div className='rounded-2xl bg-white p-6 shadow'>
           <p className='text-sm font-medium uppercase tracking-[0.2em] text-slate-500'>Printing AI Quote Assistant</p>
-          <h1 className='mt-2 text-3xl font-bold text-slate-900'>印刷报价与方案建议 Demo</h1>
+          <h1 className='mt-2 text-3xl font-bold text-slate-900'>复杂包装一期报价 Demo</h1>
           <p className='mt-2 text-slate-600'>
-            面向标准印刷咨询场景，支持画册、传单、名片、海报等常见需求。可先咨询材料和规格，再自然进入推荐方案、参考报价或正式报价。
+            当前活跃自动报价范围聚焦一期复杂包装，支持飞机盒、双插盒、开窗彩盒、说明书、内托、封口贴等需求；简单印刷品默认转人工核价。
+          </p>
+          <p className='mt-3 text-sm text-slate-500'>
+            下方示例已按推荐案例、正式报价、参考报价、转人工四类整理，方便直接验证不同会话入口和边界场景。
           </p>
         </div>
 
@@ -314,7 +477,7 @@ export default function Home() {
           <div className='mb-4 flex items-center justify-between gap-4'>
             <div>
               <h2 className='text-lg font-semibold text-slate-900'>开始咨询或报价</h2>
-              <p className='mt-1 text-sm text-slate-600'>先输入用途、品类、数量、规格或预算倾向，系统会尽量先回答问题，再给出常见配置和报价路径。</p>
+              <p className='mt-1 text-sm text-slate-600'>可直接输入需求，或从下方四类测试入口一键填入。系统会分别落到推荐、正式报价、参考报价或人工接管链路。</p>
             </div>
             <p className='text-xs text-slate-500'>会话编号：{conversationId ?? '未创建'}</p>
           </div>
@@ -328,22 +491,47 @@ export default function Home() {
                   handleSend()
                 }
               }}
-              placeholder='例如：企业宣传册预算有限，推荐一个常见方案；或者：我想印1000本A4画册，封面200g铜版纸，内页157g铜版纸，骑马钉'
+              placeholder='例如：我想做个外包装，预算不要太高；或：飞机盒，20*12*6cm，300克白卡，四色印刷，5000个；也可以直接点下方分组示例'
               className='w-full rounded border border-gray-300 p-3 font-mono text-sm focus:border-blue-500 focus:outline-none'
               rows={3}
             />
           </div>
-          <div className='mb-4 flex flex-wrap gap-2'>
-            {examplePrompts.map((prompt) => (
-              <button
-                key={prompt}
-                type='button'
-                onClick={() => setMessage(prompt)}
-                className='rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100'
-              >
-                {prompt}
-              </button>
-            ))}
+          <div className='mb-4 space-y-3'>
+            <div className='flex items-center justify-between gap-3'>
+              <p className='text-sm font-semibold text-slate-900'>测试入口示例</p>
+              <p className='text-xs text-slate-500'>点击任一示例即可填入输入框</p>
+            </div>
+            <div className='grid gap-3 md:grid-cols-2'>
+              {HOME_EXAMPLE_GROUPS.map((group) => {
+                const tone = exampleGroupToneMap[group.key]
+
+                return (
+                  <div key={group.key} className={`rounded-2xl border p-4 ${tone.card}`}>
+                    <div className='flex items-start justify-between gap-3'>
+                      <div>
+                        <h3 className={`text-base font-semibold ${tone.title}`}>{group.title}</h3>
+                        <p className={`mt-1 text-sm ${tone.text}`}>{group.description}</p>
+                      </div>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${tone.badge}`}>
+                        {group.badge}
+                      </span>
+                    </div>
+                    <div className='mt-4 space-y-2'>
+                      {group.prompts.map((prompt) => (
+                        <button
+                          key={prompt}
+                          type='button'
+                          onClick={() => setMessage(prompt)}
+                          className={`w-full rounded-xl border px-3 py-2 text-left text-sm transition-colors ${tone.button}`}
+                        >
+                          {prompt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
           <button
             onClick={handleSend}
@@ -451,11 +639,14 @@ export default function Home() {
                   <p className='font-semibold text-amber-900'>当前先给您一版参考报价，后续补齐关键信息后可以继续生成更准确的正式报价。</p>
                 </div>
                 {renderQuoteSummaryCard('当前参考报价', result.estimatedData, 'amber')}
+                {renderPackagingReview(result.packagingReview)}
+                {renderBundleItems(result.estimatedData)}
                 <div>
                   <p className='mb-2 text-sm font-semibold text-gray-700'>当前仍待确认的信息</p>
                   {renderMissingFieldTags(result.missingFields || [])}
                 </div>
                 {renderParamSection('当前用于估价的配置', result.estimatedData?.normalizedParams?.productType || result.mergedParams?.productType, result.estimatedData?.normalizedParams || result.mergedParams, 'slate')}
+                {renderReferenceFiles(result.referenceFiles || result.estimatedData?.referenceFiles)}
                 {renderEstimatedHighlights(result.estimatedData)}
               </div>
             )}
@@ -466,7 +657,10 @@ export default function Home() {
                   <p className='font-semibold text-green-900'>系统已经按当前配置生成正式报价，您可以直接核对价格和规格。</p>
                 </div>
                 {renderQuoteSummaryCard('当前报价结果', result.data, 'green')}
+                {renderPackagingReview(result.packagingReview)}
+                {renderBundleItems(result.data)}
                 {renderParamSection('当前确认配置', result.data?.normalizedParams?.productType, result.data?.normalizedParams, 'slate')}
+                {renderReferenceFiles(result.referenceFiles || result.data?.referenceFiles)}
               </div>
             )}
 
@@ -475,6 +669,7 @@ export default function Home() {
                 <div className='rounded-lg border border-orange-200 bg-orange-50 p-4'>
                   <p className='font-semibold text-orange-900'>当前询价已经转入人工处理，后续会由人工团队继续核价和跟进。</p>
                 </div>
+                {renderPackagingReview(result.packagingReview)}
                 <HandoffRequestPanel
                   conversationId={conversationId}
                   statusLabel='待人工接管'
@@ -484,6 +679,12 @@ export default function Home() {
                   triggerLabel='查看人工处理说明'
                 />
                 {renderParamSection('当前已整理的信息', result.mergedParams?.productType, result.mergedParams || result.mergedRecommendedParams, 'slate')}
+              </div>
+            )}
+
+            {result.status === 'missing_fields' && result.packagingReview && (
+              <div className='mt-3'>
+                {renderPackagingReview(result.packagingReview)}
               </div>
             )}
 
@@ -516,6 +717,7 @@ export default function Home() {
                 {renderKeyValueBlock('本轮抽取参数 extractedParams', result.extractedParams)}
                 {renderKeyValueBlock('合并后参数 mergedParams', result.mergedParams)}
                 {renderKeyValueBlock('最终缺失字段 missingFields', result.missingFields)}
+                {renderKeyValueBlock('包装解释 packagingReview', result.packagingReview)}
                 {renderKeyValueBlock('知识问答 RAG 调试', (result.ragQuery || result.retrievedKnowledge || result.ragFallbackUsed !== undefined)
                   ? {
                       ragQuery: result.ragQuery,

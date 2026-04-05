@@ -2,7 +2,7 @@ import OpenAI from 'openai'
 import { z } from 'zod'
 import { buildAgentRouterPrompt } from '@/server/ai/prompts/agentRouter'
 import { isEnvVarConfigured, requireOpenAIKey } from '@/server/config/env'
-import { detectIntent, hasStrongFileReviewSignal, looksLikeFreshQuoteRequest, type DetectIntentInput } from '@/server/intent/detectIntent'
+import { detectIntent, hasStrongFileReviewSignal, looksLikeConsultativePackagingInquiry, looksLikeFreshQuoteRequest, type DetectIntentInput } from '@/server/intent/detectIntent'
 import { logRouterHit, type TraceContext } from '@/server/logging/routerRagTrace'
 
 export type AgentRouterIntent =
@@ -190,6 +190,10 @@ function protectModelDecision(input: DetectIntentInput, decision: AgentRouteDeci
   const normalizedText = normalizeText(input.message)
   const hasFileSignal = hasStrongFileReviewSignal(normalizedText)
   const hasQuoteSignal = looksLikeFreshQuoteRequest(normalizedText)
+
+  if (looksLikeConsultativePackagingInquiry(normalizedText) && (decision.intent === 'QUOTE_REQUEST' || decision.intent === 'PROVIDE_PARAMS')) {
+    return mapDetectedIntentToRoute(input)
+  }
 
   if (decision.intent === 'FILE_BASED_INQUIRY' && !hasFileSignal) {
     return mapDetectedIntentToRoute(input)

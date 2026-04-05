@@ -190,6 +190,7 @@ async function main() {
 
     assert(consultation.status === 'consultation_reply', '咨询轮应返回 consultation_reply')
     assert(Boolean(consultation.recommendedParams), '咨询轮应返回 recommendedParams')
+    assert(consultation.reply.includes('按这个方案报价'), '咨询轮应明确下一步可直接报价')
 
     const confirmation = await sendChat!({
       conversationId: consultation.conversationId,
@@ -198,6 +199,7 @@ async function main() {
 
     assert(confirmation.intent === 'RECOMMENDATION_CONFIRMATION', '确认轮应识别为 RECOMMENDATION_CONFIRMATION')
     assert(confirmation.status === 'quoted', '确认轮应进入 quoted')
+    assert(confirmation.reply.includes('这边先按您这版参数算好了'), '确认轮 quoted 回复应更像客服发报价')
     assert(confirmation.mergedParams.productType === 'album', '应带入推荐方案 productType')
     assert(confirmation.mergedParams.pageCount === 32, '应带入推荐方案页数')
     assert(confirmation.mergedParams.quantity === 1000, '应合并当前消息数量')
@@ -231,6 +233,7 @@ async function main() {
 
     assert(confirmation.intent === 'RECOMMENDATION_CONFIRMATION', '确认轮应识别为 RECOMMENDATION_CONFIRMATION')
     assert(confirmation.status === 'estimated', '参数仍不全时应进入 estimated')
+    assert(confirmation.reply.includes('先给您一个参考价'), 'estimated 回复应更自然')
     assert(Array.isArray(confirmation.missingFields), '应返回 missingFields')
     assert(confirmation.missingFields.includes('printSides'), '应只缺少 printSides')
     assert(confirmation.mergedParams.finishedSize === 'A4', '应带入推荐方案尺寸')
@@ -352,6 +355,7 @@ async function main() {
     })
 
     assert(patch.status === 'recommendation_updated', '自然表达 patch 应返回 recommendation_updated')
+    assert(patch.reply.includes('好的，这版我已经按您的意思改成') || patch.reply.includes('这版方案我已经帮您更新了'), 'patch 回复应明确更新后的承接')
     assert(patch.mergedRecommendedParams.pageCount === 32, '页数应保持原推荐值')
     assert(patch.mergedRecommendedParams.bindingType === 'perfect_bind', '装订应替换为胶装')
   })
@@ -399,6 +403,7 @@ async function main() {
 
     assert(rerecommended.intent === 'BARGAIN_REQUEST', '应识别为 BARGAIN_REQUEST')
     assert(rerecommended.status === 'recommendation_updated', '应返回 recommendation_updated')
+    assert(rerecommended.reply.includes('给您换一版更贴近需求的方向'), '重推荐回复应更像客服重新给方案')
     assert(rerecommended.recommendedParams.recommendedParams.pageCount === 24, '应返回更经济的画册页数')
     assert(rerecommended.recommendedParams.recommendedParams.innerWeight === 128, '应返回更经济的内页克重')
   })

@@ -1,6 +1,8 @@
 // Lightweight improvement suggestion types
 // Derived from APPROVED reflections - no new database table initially
 
+import { getReflectionIssueTypeLabel } from '@/lib/reflection/issueTypes'
+
 export type ImprovementSuggestionType =
   | 'PROMPT_IMPROVEMENT'
   | 'REGEX_IMPROVEMENT'
@@ -32,6 +34,36 @@ export type ImprovementImpactArea =
   | 'HANDOFF'
   | 'OTHER'
 
+export type ImprovementActionChangeType =
+  | 'prompt_update'
+  | 'mapping_update'
+  | 'extraction_rule_update'
+  | 'threshold_update'
+  | 'policy_update'
+  | 'pricing_rule_review'
+  | 'test_only_update'
+  | 'other_update'
+
+export type ImprovementActionRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH'
+
+export interface ImprovementActionDraft {
+  actionTitle: string
+  targetArea: ImprovementTargetArea
+  changeType: ImprovementActionChangeType
+  targetFileHint?: string
+  implementationNote: string
+  testHint: string
+  riskLevel: ImprovementActionRiskLevel
+}
+
+export type ImprovementDiffCategory =
+  | 'PARAM_RECOGNITION'
+  | 'BUNDLE_STRUCTURE'
+  | 'QUOTE_BOUNDARY'
+  | 'REVIEW_POLICY'
+  | 'PRICING_JUDGMENT'
+  | 'OTHER'
+
 export interface ImprovementSuggestion {
   id: string // derived from reflection_id + hash
   sourceReflectionId: number
@@ -48,8 +80,15 @@ export interface ImprovementSuggestion {
   title: string
   summary: string
   suggestionDraft: string
+  actionDraft?: ImprovementActionDraft
+  issueSummary?: string
+  diffCategory?: ImprovementDiffCategory
+  confidence?: number
+  whyItHappened?: string
+  suggestedActionHint?: string
   originalExtractedParams?: Record<string, any>
   correctedParams?: Record<string, any>
+  contextSummary?: string
   status: ImprovementSuggestionStatus // stored in JSON for now
   createdAt: Date
   lastActionAt?: string
@@ -125,8 +164,20 @@ export function classifyImprovementType(
     return 'HANDOFF_POLICY_IMPROVEMENT'
   }
 
+  if (issueType === 'SHOULD_HANDOFF_BUT_NOT' || issueType === 'PACKAGING_REVIEW_REASON_WRONG') {
+    return 'HANDOFF_POLICY_IMPROVEMENT'
+  }
+
   if (issueType === 'PARAM_MISSING') {
     return 'ESTIMATE_DEFAULT_IMPROVEMENT'
+  }
+
+  if (issueType === 'PACKAGING_PARAM_MISSING' || issueType === 'PACKAGING_PARAM_WRONG') {
+    return 'FIELD_MAPPING_IMPROVEMENT'
+  }
+
+  if (issueType === 'BUNDLE_STRUCTURE_WRONG') {
+    return 'PROMPT_IMPROVEMENT'
   }
 
   if (
@@ -141,6 +192,14 @@ export function classifyImprovementType(
       return 'OTHER'
     }
 
+    return 'ESTIMATE_DEFAULT_IMPROVEMENT'
+  }
+
+  if (
+    issueType === 'PACKAGING_PRICE_INACCURATE'
+    || issueType === 'SHOULD_ESTIMATE_BUT_QUOTED'
+    || issueType === 'SHOULD_QUOTED_BUT_ESTIMATED'
+  ) {
     return 'ESTIMATE_DEFAULT_IMPROVEMENT'
   }
 
@@ -171,12 +230,7 @@ export function generateTitle(
     OTHER: '其他改进建议',
   }[suggestionType]
 
-  const issueLabel = {
-    PARAM_MISSING: '缺失参数',
-    PARAM_WRONG: '参数错误',
-    QUOTE_INACCURATE: '报价不准',
-    SHOULD_HANDOFF: '应转人工',
-  }[issueType] || issueType
+  const issueLabel = getReflectionIssueTypeLabel(issueType)
 
   return `${typeLabel} - ${issueLabel}`
 }
@@ -206,6 +260,22 @@ export function deriveImpactArea(params: {
 
   if (params.targetArea === 'HANDOFF_POLICY' || params.suggestionType === 'HANDOFF_POLICY_IMPROVEMENT' || params.issueType === 'SHOULD_HANDOFF') {
     return 'HANDOFF'
+  }
+
+  if (params.issueType === 'SHOULD_HANDOFF_BUT_NOT' || params.issueType === 'PACKAGING_REVIEW_REASON_WRONG') {
+    return 'HANDOFF'
+  }
+
+  if (params.issueType === 'BUNDLE_STRUCTURE_WRONG') {
+    return 'PATCH'
+  }
+
+  if (
+    params.issueType === 'PACKAGING_PRICE_INACCURATE'
+    || params.issueType === 'SHOULD_ESTIMATE_BUT_QUOTED'
+    || params.issueType === 'SHOULD_QUOTED_BUT_ESTIMATED'
+  ) {
+    return 'PRICING'
   }
 
   if (includesAny(text, ['patch', 'recommendation_updated', '多轮 patch', '更新方案', '方案 patch', '局部修改', '覆盖前一轮', 'mergedrecommendedparams'])) {
@@ -244,10 +314,15 @@ export function deriveImpactArea(params: {
     return 'PRICING'
   }
 
+  if (params.issueType === 'PACKAGING_PARAM_MISSING' || params.issueType === 'PACKAGING_PARAM_WRONG') {
+    return 'PRICING'
+  }
+
   return 'OTHER'
 }
 
 export function generateImplementationHint(
+  issueType: string,
   suggestionType: ImprovementSuggestionType,
   suggestionDraft: string
 ): {
@@ -259,31 +334,41 @@ export function generateImplementationHint(
     case 'PROMPT_IMPROVEMENT':
       return {
         targetArea: 'PROMPT',
-        targetFileHint: 'src/server/ai/extractQuoteParams.ts',
+        targetFileHint: issueType === 'BUNDLE_STRUCTURE_WRONG'
+          ? 'src/server/packaging/extractComplexPackagingQuote.ts'
+          : 'src/server/ai/extractQuoteParams.ts',
         implementationNote: `建议先审阅提示词文本，再做小步调整并回归测试。参考建议：${generateSummary(suggestionDraft)}`,
       }
     case 'REGEX_IMPROVEMENT':
       return {
         targetArea: 'REGEX',
-        targetFileHint: 'src/server/ai/extractQuoteParams.ts',
+        targetFileHint: issueType.startsWith('PACKAGING_') || issueType === 'BUNDLE_STRUCTURE_WRONG'
+          ? 'src/server/packaging/extractComplexPackagingQuote.ts'
+          : 'src/server/ai/extractQuoteParams.ts',
         implementationNote: '建议检查参数提取正则与术语映射，增加样例测试后再上线。',
       }
     case 'FIELD_MAPPING_IMPROVEMENT':
       return {
         targetArea: 'FIELD_MAPPING',
-        targetFileHint: 'src/lib/catalog/productSchemas.ts',
+        targetFileHint: issueType.startsWith('PACKAGING_')
+          ? 'src/server/packaging/extractComplexPackagingQuote.ts'
+          : 'src/lib/catalog/productSchemas.ts',
         implementationNote: '建议核对字段语义映射关系，并验证多轮补参合并行为。',
       }
     case 'ESTIMATE_DEFAULT_IMPROVEMENT':
       return {
         targetArea: 'ESTIMATE',
-        targetFileHint: 'src/lib/catalog/helpers.ts',
+        targetFileHint: issueType.startsWith('PACKAGING_') || issueType.startsWith('SHOULD_')
+          ? 'src/server/chat/createChatPostHandler.ts'
+          : 'src/lib/catalog/helpers.ts',
         implementationNote: '建议评估默认参数是否合理，修改后重点验证 estimated 场景。',
       }
     case 'HANDOFF_POLICY_IMPROVEMENT':
       return {
         targetArea: 'HANDOFF_POLICY',
-        targetFileHint: 'src/app/api/chat/route.ts',
+        targetFileHint: issueType.startsWith('PACKAGING_') || issueType === 'SHOULD_HANDOFF_BUT_NOT'
+          ? 'src/server/chat/createChatPostHandler.ts'
+          : 'src/app/api/chat/route.ts',
         implementationNote: '建议检查文件型询价与风险判定分支，确保只增强转人工策略。',
       }
     case 'OTHER':

@@ -1,4 +1,6 @@
 import { cookies } from 'next/headers'
+import { ADMIN_ACTOR_COOKIE_NAME, parseAdminActorSessionValue } from '@/lib/adminActorSession'
+import { formatGovernanceActorLabel } from '@/lib/actorIdentity'
 import {
   ADMIN_ACCESS_COOKIE_NAME,
   ADMIN_SECRET_HEADER_NAME,
@@ -44,6 +46,7 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
   const adminSecret = getAdminSecretFromEnv()
   const nextPath = buildAdminRedirectTarget(searchParams?.next)
   const sessionToken = cookies().get(ADMIN_ACCESS_COOKIE_NAME)?.value
+  const currentActor = parseAdminActorSessionValue(cookies().get(ADMIN_ACTOR_COOKIE_NAME)?.value)
   const sessionActive = adminSecret
     ? await hasValidAdminAccess({ sessionToken, adminSecret })
     : false
@@ -90,6 +93,30 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
             <form action='/api/admin/session' method='post' className='mt-4 space-y-4'>
               <input type='hidden' name='next' value={nextPath} />
               <label className='block text-sm text-slate-700'>
+                <span className='mb-2 block font-medium'>操作者姓名</span>
+                <input
+                  type='text'
+                  name='actorName'
+                  defaultValue={currentActor?.actorSource === 'admin-session' ? currentActor.actorName : ''}
+                  className='w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 placeholder:text-slate-400'
+                  placeholder='建议填写真实姓名或工号名称'
+                  autoComplete='name'
+                  disabled={!protectionEnabled}
+                />
+              </label>
+              <label className='block text-sm text-slate-700'>
+                <span className='mb-2 block font-medium'>操作者邮箱</span>
+                <input
+                  type='email'
+                  name='actorEmail'
+                  defaultValue={currentActor?.actorEmail || ''}
+                  className='w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 placeholder:text-slate-400'
+                  placeholder='可选，用于更清晰的留痕'
+                  autoComplete='email'
+                  disabled={!protectionEnabled}
+                />
+              </label>
+              <label className='block text-sm text-slate-700'>
                 <span className='mb-2 block font-medium'>ADMIN_SECRET</span>
                 <input
                   type='password'
@@ -100,6 +127,9 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
                   disabled={!protectionEnabled}
                 />
               </label>
+              <p className='text-xs leading-5 text-slate-500'>
+                建议填写真实操作者信息。未填写时，治理动作会回退记录为“后台管理员”，以兼容旧会话和脚本调用。
+              </p>
               <button
                 type='submit'
                 disabled={!protectionEnabled}
@@ -130,6 +160,10 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
               <div>
                 <dt className='font-medium text-slate-900'>后台会话</dt>
                 <dd>{sessionActive ? '已授权' : '未授权'}</dd>
+              </div>
+              <div>
+                <dt className='font-medium text-slate-900'>当前操作者</dt>
+                <dd>{formatGovernanceActorLabel(currentActor)}</dd>
               </div>
               <div>
                 <dt className='font-medium text-slate-900'>授权后默认跳转</dt>

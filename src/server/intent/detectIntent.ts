@@ -47,6 +47,8 @@ const BARGAIN_KEYWORDS = [
   '更便宜的',
   '预算有限',
   '预算不高',
+  '预算不要太高',
+  '预算别太高',
   '经济方案',
   '经济一点',
   '更经济一点',
@@ -59,13 +61,46 @@ const BARGAIN_KEYWORDS = [
   '性价比',
 ]
 const QUOTE_KEYWORDS = ['报价', '价格', '多少钱', '怎么卖', '什么价', '询价', '核价']
-const PRODUCT_KEYWORDS = ['画册', '册子', 'brochure', 'album', '传单', 'flyer', '名片', '海报', 'poster']
+const PRODUCT_KEYWORDS = ['画册', '册子', 'brochure', 'album', '传单', 'flyer', '名片', '海报', 'poster', '飞机盒', '双插盒', '开窗彩盒', '彩盒', '说明书', '内托', '封口贴', '透明贴纸', '包装盒']
+const PACKAGING_PRODUCT_KEYWORDS = ['飞机盒', '双插盒', '开窗彩盒', '开窗盒', '彩盒', '说明书', '内托', '封口贴', '透明贴纸', '包装盒']
+const GENERAL_PACKAGING_KEYWORDS = ['纸盒', '纸箱', '盒子', '箱子', '盒型', '包装', '包装盒', '彩盒', '外包装']
 const NEW_QUOTE_STARTER_KEYWORDS = ['我想印', '想印', '要印', '帮我报价', '给我报个价', '报个价', '重新报价', '重新核价']
 const MATERIAL_KEYWORDS = ['铜版纸', '哑粉', '哑粉纸', '哑光纸', '艺术纸', '双胶纸', '白卡', '纸张', '克重', '材质']
 const PROCESS_KEYWORDS = ['骑马钉', '胶装', '锁线', '精装', '装订', '覆膜', '烫金', 'uv', '工艺']
 const SPEC_KEYWORDS = ['a3', 'a4', 'a5', '尺寸', '规格', '多少页', '页数', '90x54', '名片尺寸']
 const SOLUTION_KEYWORDS = ['方案', '配置', '搭配', '推荐一个', '常见方案', '标准方案']
 const CONSULTATION_QUESTION_KEYWORDS = ['区别', '介绍', '推荐', '怎么选', '哪个好', '适合', '一般', '合适', '优缺点', '建议', '什么意思']
+const CONSULTATIVE_PACKAGING_PHRASES = [
+  '怎么卖',
+  '怎么报价',
+  '一般怎么报价',
+  '怎么收费',
+  '一般多少钱',
+  '一般什么价',
+  '这种包装一般多少钱',
+  '一般怎么做',
+  '怎么做',
+  '有哪些能做',
+  '有什么方案',
+  '有哪些方案',
+  '有什么推荐',
+  '有哪些推荐',
+  '推荐什么',
+  '一般推荐什么',
+  '有哪些常见方案',
+  '推荐一下',
+  '外包装推荐',
+  '外包装怎么选',
+  '盒子怎么选',
+  '怎么选',
+  '盒型能做',
+  '能做什么盒型',
+  '做什么盒型',
+  '用什么盒型',
+  '适合什么盒型',
+  '什么盒型合适',
+]
+const PACKAGING_USE_CASE_KEYWORDS = ['装', '用途', '场景', '护肤品', '化妆品', '美妆', '赠品', '礼品', '卡片', '小卡片']
 const RECOMMENDATION_CONFIRM_REFERENCE_KEYWORDS = [
   '按这个方案', '按这个来', '那就按这个', '那就这个', '就这个方案', '就这个', '按此方案', '照这个',
   '按这个报价', '按这个方案估价', '就按这个方案估价', '按这个估个参考价', '现在算一下', '现在估一下',
@@ -140,9 +175,26 @@ export function hasStrongFileReviewSignal(message: string): boolean {
   return false
 }
 
-export function extractExplicitProductType(text: string): 'album' | 'flyer' | 'business_card' | 'poster' | undefined {
+export function extractExplicitProductType(text: string):
+  | 'album'
+  | 'flyer'
+  | 'business_card'
+  | 'poster'
+  | 'mailer_box'
+  | 'tuck_end_box'
+  | 'window_box'
+  | 'leaflet_insert'
+  | 'box_insert'
+  | 'seal_sticker'
+  | undefined {
   const normalizedText = text.trim().toLowerCase()
 
+  if (normalizedText.includes('飞机盒') || normalizedText.includes('mailer box')) return 'mailer_box'
+  if (normalizedText.includes('双插盒') || normalizedText.includes('tuck end')) return 'tuck_end_box'
+  if (normalizedText.includes('开窗彩盒') || normalizedText.includes('window box')) return 'window_box'
+  if (normalizedText.includes('说明书') || normalizedText.includes('leaflet')) return 'leaflet_insert'
+  if (normalizedText.includes('内托') || normalizedText.includes('insert')) return 'box_insert'
+  if (normalizedText.includes('封口贴') || normalizedText.includes('透明贴纸')) return 'seal_sticker'
   if (normalizedText.includes('名片')) return 'business_card'
   if (normalizedText.includes('海报') || normalizedText.includes('poster')) return 'poster'
   if (normalizedText.includes('传单') || normalizedText.includes('flyer')) return 'flyer'
@@ -165,9 +217,13 @@ function looksLikeParameterSupplement(text: string): boolean {
   return (hasDigits || hasParamWords) && isShortMessage
 }
 
+function hasQuantityOrSpecSignal(text: string): boolean {
+  return /\d+\s*(本|张|份|页|个|套|mm|cm|g|克)/.test(text) || includesAny(text, ['数量', '尺寸', '成品'])
+}
+
 function hasCompleteQuoteSignal(text: string): boolean {
   const hasProduct = includesAny(text, PRODUCT_KEYWORDS)
-  const hasQuantityOrSpec = /\d+\s*(本|张|份|页|mm|cm|g|克)/.test(text) || includesAny(text, ['数量', '尺寸', '成品'])
+  const hasQuantityOrSpec = hasQuantityOrSpecSignal(text)
   const hasQuoteKeyword = includesAny(text, QUOTE_KEYWORDS)
   return (hasProduct && hasQuantityOrSpec) || (hasProduct && hasQuoteKeyword)
 }
@@ -180,6 +236,24 @@ export function looksLikeFreshQuoteRequest(text: string): boolean {
 
 function looksLikeConsultation(text: string): boolean {
   return includesAny(text, CONSULTATION_QUESTION_KEYWORDS) || text.includes('？') || text.includes('?')
+}
+
+export function looksLikeConsultativePackagingInquiry(text: string): boolean {
+  const normalizedText = text.trim().toLowerCase()
+  const hasPackagingSubject = includesAny(normalizedText, PACKAGING_PRODUCT_KEYWORDS) || includesAny(normalizedText, GENERAL_PACKAGING_KEYWORDS)
+  const hasGenericPackagingRecommendation = includesAny(normalizedText, GENERAL_PACKAGING_KEYWORDS)
+    && includesAny(normalizedText, ['推荐', '怎么选', '适合', '方案'])
+  const hasUseCaseRecommendation = includesAny(normalizedText, PACKAGING_USE_CASE_KEYWORDS)
+    && includesAny(normalizedText, ['推荐', '怎么选', '适合'])
+  const hasBudgetPackagingConsultation = hasPackagingSubject && includesAny(normalizedText, BARGAIN_KEYWORDS)
+  const hasConsultativePhrase = includesAny(normalizedText, CONSULTATIVE_PACKAGING_PHRASES)
+    || includesAny(normalizedText, CONSULTATION_QUESTION_KEYWORDS)
+    || (includesAny(normalizedText, SOLUTION_KEYWORDS) && !hasQuantityOrSpecSignal(normalizedText))
+    || hasGenericPackagingRecommendation
+    || hasUseCaseRecommendation
+    || hasBudgetPackagingConsultation
+
+  return hasPackagingSubject && hasConsultativePhrase && !hasQuantityOrSpecSignal(normalizedText)
 }
 
 function shouldExcludeRecommendationConfirmation(text: string): boolean {
@@ -262,6 +336,10 @@ export function detectIntent(input: DetectIntentInput): DetectIntentResult {
     return { intent: 'SOLUTION_RECOMMENDATION', reason: 'recommendation_reselection_detected' }
   }
 
+  if (looksLikeConsultativePackagingInquiry(text)) {
+    return { intent: 'SOLUTION_RECOMMENDATION', reason: 'consultative_packaging_inquiry_detected' }
+  }
+
   if (includesAny(text, BARGAIN_KEYWORDS)) {
     return { intent: 'BARGAIN_REQUEST', reason: 'bargain_keywords_detected' }
   }
@@ -314,15 +392,15 @@ export function detectIntent(input: DetectIntentInput): DetectIntentResult {
 export function getIntentPlaceholderReply(intent: ChatIntent): string {
   switch (intent) {
     case 'RECOMMENDATION_CONFIRMATION':
-      return '已识别为推荐方案确认。系统将基于上一轮推荐方案继续进入报价流程。'
+      return '好的，我按上一轮说好的方案继续往报价方向走。'
     case 'PROGRESS_INQUIRY':
-      return '已识别为进度咨询。当前 MVP 暂不提供自动进度查询，请联系人工或查看会话最新状态。'
+      return '我先帮您看这单进度；如果当前还没有结果，我会直接告诉您下一步该补什么。'
     case 'SAMPLE_REQUEST':
-      return '已识别为打样/样品需求。当前 MVP 暂不自动处理打样流程，请由人工继续确认。'
+      return '可以，我先按打样或样品需求帮您记下来，您继续发产品信息就行。'
     case 'BARGAIN_REQUEST':
-      return '已识别为议价需求。当前 MVP 暂不自动议价，请由人工按标准规则继续跟进。'
+      return '可以，我按控成本的方向先帮您收一版更合适的方案。'
     case 'UNKNOWN':
     default:
-      return '已收到您的消息。您可以直接告诉我产品、尺寸和数量；如果需要人工协助，也可以直接说“转人工”。'
+      return '收到。您可以直接告诉我产品、尺寸和数量；如果需要人工协助，也可以直接说“转人工”。'
   }
 }

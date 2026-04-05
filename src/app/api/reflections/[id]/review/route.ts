@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server'
-import { updateReflectionStatus } from '@/server/db/conversations'
+import { updateReflectionRecord } from '@/server/db/conversations'
 import { prisma } from '@/server/db/prisma'
+import { isReflectionIssueType } from '@/lib/reflection/issueTypes'
+
+function isObject(value: unknown): value is Record<string, any> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
   try {
@@ -13,12 +18,45 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     }
 
     const body = await request.json()
-    const { status } = body
+    const { status, issueType, correctedParams, correctedQuoteSummary } = body
 
     const validStatuses = ['NEW', 'REVIEWED', 'APPROVED', 'REJECTED']
-    if (!validStatuses.includes(status)) {
+    if (status !== undefined && !validStatuses.includes(status)) {
       return NextResponse.json(
         { ok: false, error: 'Invalid status. Must be NEW, REVIEWED, APPROVED, or REJECTED' },
+        { status: 400 }
+      )
+    }
+
+    if (issueType !== undefined && (!isReflectionIssueType(issueType))) {
+      return NextResponse.json(
+        { ok: false, error: 'Invalid issueType' },
+        { status: 400 }
+      )
+    }
+
+    if (correctedParams !== undefined && correctedParams !== null && !isObject(correctedParams)) {
+      return NextResponse.json(
+        { ok: false, error: 'Invalid correctedParams. Must be an object or null' },
+        { status: 400 }
+      )
+    }
+
+    if (correctedQuoteSummary !== undefined && correctedQuoteSummary !== null && typeof correctedQuoteSummary !== 'string') {
+      return NextResponse.json(
+        { ok: false, error: 'Invalid correctedQuoteSummary. Must be a string or null' },
+        { status: 400 }
+      )
+    }
+
+    if (
+      status === undefined
+      && issueType === undefined
+      && correctedParams === undefined
+      && correctedQuoteSummary === undefined
+    ) {
+      return NextResponse.json(
+        { ok: false, error: 'No editable fields provided' },
         { status: 400 }
       )
     }
@@ -35,11 +73,12 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       )
     }
 
-    // Update status
-    const updated = await updateReflectionStatus(
-      reflectionId,
-      status as 'NEW' | 'REVIEWED' | 'APPROVED' | 'REJECTED'
-    )
+    const updated = await updateReflectionRecord(reflectionId, {
+      status: status as 'NEW' | 'REVIEWED' | 'APPROVED' | 'REJECTED' | undefined,
+      issueType,
+      correctedParams,
+      correctedQuoteSummary,
+    })
 
     return NextResponse.json({
       ok: true,

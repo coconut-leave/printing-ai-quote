@@ -1,5 +1,8 @@
 import { getProductTypeFromMetadata, inferResponseStatus, type TrackingConversation } from '@/server/analytics/consultationTracking'
+import { ACTIVE_AUTO_QUOTE_PRODUCT_TYPES, isActiveAutoQuoteProductType } from '@/lib/catalog/productSchemas'
 import { buildImprovementSuggestions, type ReflectionForImprovement } from '@/server/learning/improvementView'
+import { collectReflectionMissingFields } from '@/lib/reflection/context'
+import { isMissingFieldReflectionIssueType } from '@/lib/reflection/issueTypes'
 
 export type DashboardPeriod = 'today' | '7d' | '30d'
 
@@ -26,6 +29,14 @@ type LearningOverview = {
   verifiedActionCount: number
 }
 
+type ProductTypeBreakdownRow = {
+  productType: string
+  quotedCount: number
+  estimatedCount: number
+  missingFieldsCount: number
+  handoffRequiredCount: number
+}
+
 type TrendDelta<T extends Record<string, number>> = {
   [K in keyof T as `${Extract<K, string>}Delta`]: number
 }
@@ -50,13 +61,10 @@ type BaseDashboardStats = {
   }
   consultationFunnel: FunnelOverview
   consultationFunnelTrend: TrendDelta<FunnelOverview>
-  productTypeBreakdown: Array<{
-    productType: string
-    quotedCount: number
-    estimatedCount: number
-    missingFieldsCount: number
-    handoffRequiredCount: number
-  }>
+  productTypeBreakdown: ProductTypeBreakdownRow[]
+  nonActiveProductTypeBreakdown: ProductTypeBreakdownRow[]
+  activeAutoQuoteProductTypes: string[]
+  nonActiveProductRecordCount: number
   learningOverview: LearningOverview
   learningTrend: TrendDelta<LearningOverview>
   topIssues: {
@@ -171,9 +179,9 @@ function buildTopMissingFields(reflections: ReflectionForImprovement[]) {
   const fieldCount = new Map<string, number>()
 
   reflections.forEach((item) => {
-    if (item.issueType !== 'PARAM_MISSING') return
+    if (!isMissingFieldReflectionIssueType(item.issueType)) return
 
-    Object.keys(item.correctedParams || {}).forEach((field) => {
+    collectReflectionMissingFields(item.originalExtractedParams || undefined, item.correctedParams || undefined).forEach((field) => {
       fieldCount.set(field, (fieldCount.get(field) || 0) + 1)
     })
   })
@@ -206,7 +214,21 @@ function buildTopHandoffReasons(conversations: TrackingConversation[], startAt: 
 }
 
 function sortProductTypes<T extends { productType: string }>(rows: T[]): T[] {
-  const order = ['album', 'flyer', 'business_card', 'poster', 'sticker', 'paper_bag', 'unknown']
+  const order = [
+    'tuck_end_box',
+    'mailer_box',
+    'window_box',
+    'leaflet_insert',
+    'box_insert',
+    'seal_sticker',
+    'album',
+    'flyer',
+    'business_card',
+    'poster',
+    'sticker',
+    'paper_bag',
+    'unknown',
+  ]
   return rows.sort((a, b) => {
     const scoreA = (a as any).quotedCount + (a as any).estimatedCount + (a as any).missingFieldsCount + (a as any).handoffRequiredCount
     const scoreB = (b as any).quotedCount + (b as any).estimatedCount + (b as any).missingFieldsCount + (b as any).handoffRequiredCount
@@ -244,13 +266,7 @@ function buildBaseDashboardStats(params: {
 
   const intentCount = new Map<string, number>()
   const topicCount = new Map<string, number>()
-  const productTypeBreakdownMap = new Map<string, {
-    productType: string
-    quotedCount: number
-    estimatedCount: number
-    missingFieldsCount: number
-    handoffRequiredCount: number
-  }>()
+  const productTypeBreakdownMap = new Map<string, ProductTypeBreakdownRow>()
 
   for (const conversation of params.conversations) {
     const assistantMessages = (conversation.messages || []).filter((message) => message.sender === 'ASSISTANT')
@@ -323,6 +339,7 @@ function buildBaseDashboardStats(params: {
     }
 
     statusHits.forEach((productType, status) => {
+      const isActiveProductType = isActiveAutoQuoteProductType(productType)
       const row = productTypeBreakdownMap.get(productType) || {
         productType,
         quotedCount: 0,
@@ -332,22 +349,30 @@ function buildBaseDashboardStats(params: {
       }
 
       if (status === 'quoted') {
-        quotePathOverview.quotedCount += 1
+        if (isActiveProductType) {
+          quotePathOverview.quotedCount += 1
+        }
         row.quotedCount += 1
       }
 
       if (status === 'estimated') {
-        quotePathOverview.estimatedCount += 1
+        if (isActiveProductType) {
+          quotePathOverview.estimatedCount += 1
+        }
         row.estimatedCount += 1
       }
 
       if (status === 'missing_fields') {
-        quotePathOverview.missingFieldsCount += 1
+        if (isActiveProductType) {
+          quotePathOverview.missingFieldsCount += 1
+        }
         row.missingFieldsCount += 1
       }
 
       if (status === 'handoff_required') {
-        quotePathOverview.handoffRequiredCount += 1
+        if (isActiveProductType) {
+          quotePathOverview.handoffRequiredCount += 1
+        }
         row.handoffRequiredCount += 1
       }
 
@@ -379,6 +404,13 @@ function buildBaseDashboardStats(params: {
     .sort((a, b) => b.count - a.count)
     .slice(0, 5)
 
+  const productTypeRows = sortProductTypes(Array.from(productTypeBreakdownMap.values()))
+  const activeProductTypeBreakdown = productTypeRows.filter((row) => isActiveAutoQuoteProductType(row.productType))
+  const nonActiveProductTypeBreakdown = productTypeRows.filter((row) => !isActiveAutoQuoteProductType(row.productType))
+  const nonActiveProductRecordCount = nonActiveProductTypeBreakdown.reduce((sum, row) => (
+    sum + row.quotedCount + row.estimatedCount + row.missingFieldsCount + row.handoffRequiredCount
+  ), 0)
+
   return {
     quotePathOverview,
     quotePathTrend: buildTrendDelta(quotePathOverview, {
@@ -402,7 +434,10 @@ function buildBaseDashboardStats(params: {
       estimatedCount: 0,
       quotedCount: 0,
     }),
-    productTypeBreakdown: sortProductTypes(Array.from(productTypeBreakdownMap.values())),
+    productTypeBreakdown: activeProductTypeBreakdown,
+    nonActiveProductTypeBreakdown,
+    activeAutoQuoteProductTypes: [...ACTIVE_AUTO_QUOTE_PRODUCT_TYPES],
+    nonActiveProductRecordCount,
     learningOverview,
     learningTrend: buildTrendDelta(learningOverview, {
       reflectionCount: 0,

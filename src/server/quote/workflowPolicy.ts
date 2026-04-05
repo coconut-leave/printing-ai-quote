@@ -3,7 +3,13 @@ import {
   getRequiredFields,
   isEstimatedAllowed,
 } from '@/lib/catalog/helpers'
-import { normalizeProductType, ProductType } from '@/lib/catalog/productSchemas'
+import {
+  ACTIVE_AUTO_QUOTE_PRODUCT_TYPES,
+  COMPLEX_PACKAGING_PRODUCT_TYPES,
+  normalizeProductType,
+  ProductType,
+  SIMPLE_PRODUCT_TYPES,
+} from '@/lib/catalog/productSchemas'
 import { hasStrongFileReviewSignal } from '@/server/intent/detectIntent'
 
 export type QuotePathStatus = 'quoted' | 'estimated' | 'handoff_required' | 'missing_fields'
@@ -13,10 +19,21 @@ export type WorkflowDecision = {
   reason: string
 }
 
-// MVP outside standard categories or complex packaging/material requests.
 const OUT_OF_SCOPE_KEYWORDS = [
-  '礼盒', '包装盒', '天地盖', '异形盒', '吸塑',
+  '礼盒', '天地盖', '异形盒', '吸塑',
   '塑料', '金属', '木盒', '布料', '皮革', '亚克力',
+]
+
+const SUPPORTED_COMPLEX_PACKAGING_KEYWORDS = [
+  '飞机盒',
+  '双插盒',
+  '开窗彩盒',
+  '说明书',
+  '内托',
+  '封口贴',
+  '透明贴纸',
+  '包装盒',
+  '彩盒',
 ]
 
 function matchMissing(missingFields: string[], expected: string[]): boolean {
@@ -29,6 +46,9 @@ export function isFileBasedInquiry(message: string): boolean {
 
 export function isOutOfScopeInquiry(message: string): boolean {
   const lower = message.toLowerCase()
+  if (SUPPORTED_COMPLEX_PACKAGING_KEYWORDS.some((keyword) => lower.includes(keyword))) {
+    return false
+  }
   return OUT_OF_SCOPE_KEYWORDS.some((keyword) => lower.includes(keyword))
 }
 
@@ -50,6 +70,14 @@ export function decideQuotePath(input: {
     return { status: 'handoff_required', reason: 'out_of_scope_inquiry' }
   }
 
+  if (input.productType && SIMPLE_PRODUCT_TYPES.includes(input.productType as ProductType)) {
+    return { status: 'handoff_required', reason: 'simple_product_auto_quote_deactivated' }
+  }
+
+  if (!input.productType) {
+    return { status: 'missing_fields', reason: 'product_type_missing' }
+  }
+
   const productType = normalizeProductType(input.productType)
 
   if (input.missingFields.length === 0) {
@@ -68,7 +96,7 @@ export function getWorkflowRulesSnapshot(): Array<{
   requiredFields: string[]
   estimatedAllowedMissingFieldSets: string[][]
 }> {
-  const productTypes: ProductType[] = ['album', 'flyer', 'business_card', 'poster']
+  const productTypes: ProductType[] = [...ACTIVE_AUTO_QUOTE_PRODUCT_TYPES]
   return productTypes.map((productType) => ({
     productType,
     requiredFields: getRequiredFields(productType),

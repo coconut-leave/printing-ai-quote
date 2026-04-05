@@ -209,12 +209,12 @@ async function main() {
     assert(!consultation.data, '咨询不应直接返回报价数据')
   })
 
-  await test('名片报价应重置旧画册正式报价上下文，进入 missing_fields', async () => {
+  await test('名片报价应重置旧画册上下文，并进入 handoff_required', async () => {
     const quotedAlbum = await sendChat!({
       message: '我想印1000本A4画册，封面200g铜版纸，内页157g铜版纸，骑马钉，32页，报价',
     })
 
-    assert(quotedAlbum.status === 'quoted', '前置画册询价应先进入 quoted')
+    assert(quotedAlbum.status === 'handoff_required', '前置画册询价应先进入 handoff_required')
 
     const businessCardQuote = await sendChat!({
       conversationId: quotedAlbum.conversationId,
@@ -222,11 +222,10 @@ async function main() {
     })
 
     assert(businessCardQuote.intent === 'QUOTE_REQUEST', '新短询价应识别为 QUOTE_REQUEST')
-    assert(businessCardQuote.status === 'missing_fields', '名片短询价应进入 missing_fields')
+    assert(businessCardQuote.status === 'handoff_required', '名片短询价应进入 handoff_required')
     assert(businessCardQuote.mergedParams.productType === 'business_card', '应重置为名片 productType')
     assert(businessCardQuote.mergedParams.pageCount === undefined, '不应沿用旧画册页数')
     assert(businessCardQuote.mergedParams.bindingType === undefined, '不应沿用旧画册装订方式')
-    assert(Array.isArray(businessCardQuote.missingFields) && businessCardQuote.missingFields.includes('finishedSize'), '应按名片规则补参')
   })
 
   await test('新产品类型请求应重置旧推荐方案上下文', async () => {
@@ -242,7 +241,7 @@ async function main() {
     })
 
     assert(businessCardQuote.intent === 'QUOTE_REQUEST', '切换产品类型后应重新识别为 QUOTE_REQUEST')
-    assert(businessCardQuote.status === 'missing_fields', '应进入名片 missing_fields')
+    assert(businessCardQuote.status === 'handoff_required', '应进入名片 handoff_required')
     assert(!businessCardQuote.patchParams, '切换产品类型时不应继续沿用旧 patch 上下文')
     assert(businessCardQuote.mergedParams.productType === 'business_card', '应重置为新的产品类型')
   })
@@ -258,12 +257,12 @@ async function main() {
     })
 
     assert(quote.intent === 'RECOMMENDATION_CONFIRMATION', '应识别为 RECOMMENDATION_CONFIRMATION')
-    assert(quote.status === 'quoted', '应进入 quoted')
+    assert(quote.status === 'handoff_required', '简单印刷推荐确认后应进入 handoff_required')
     assert(quote.mergedParams.productType === 'album', 'patch 不应隐式切换产品类型')
     assert(quote.mergedParams.bindingType === 'perfect_bind', '应应用胶装 patch')
   })
 
-  await test('多字段 patch 后最终报价参数和价格应变化', async () => {
+  await test('多字段 patch 后最终参数应使用最新补丁值', async () => {
     const consultation = await sendChat!({
       message: 'A4画册一般多少页比较合适？',
     })
@@ -278,11 +277,10 @@ async function main() {
       message: '页数改成40页，内页改128g，再算一下，1000本',
     })
 
-    assert(baseline.status === 'quoted', '基线报价应进入 quoted')
-    assert(patched.status === 'quoted', '多字段 patch 后应继续进入 quoted')
+    assert(baseline.status === 'handoff_required', '基线报价应进入 handoff_required')
+    assert(patched.status === 'handoff_required', '多字段 patch 后应继续进入 handoff_required')
     assert(patched.mergedParams.pageCount === 40, '最终报价应使用最新页数')
     assert(patched.mergedParams.innerWeight === 128, '最终报价应使用最新内页克重')
-    assert(patched.data.finalPrice !== baseline.data.finalPrice, '多字段 patch 后最终价格应变化')
   })
 
   await test('我想印A4画册1000本应识别为新的 QUOTE_REQUEST，而不是 patch', async () => {
@@ -297,7 +295,7 @@ async function main() {
 
     assert(quoteRequest.intent === 'QUOTE_REQUEST', '新的起手式应识别为 QUOTE_REQUEST')
     assert(quoteRequest.intent !== 'PARAM_SUPPLEMENT', '不应被误识别为 PARAM_SUPPLEMENT')
-    assert(quoteRequest.status === 'missing_fields', '参数不全时应进入 missing_fields')
+    assert(quoteRequest.status === 'handoff_required', '简单印刷新询价应进入 handoff_required')
     assert(!quoteRequest.patchParams, '新的询价不应继续沿用旧推荐 patch')
   })
 

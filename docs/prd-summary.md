@@ -10,7 +10,7 @@ The system should:
 - understand customer quote requests
 - collect missing quote parameters
 - call a structured pricing engine
-- return preliminary quote results
+- return quote or structured pre-quote results
 - answer basic printing FAQ
 - hand off complex cases to human staff
 
@@ -23,20 +23,24 @@ The system should:
 
 ## MVP scope
 ### Included
-- standard printing inquiry handling
+- simple product inquiry handling
+- phase-one complex packaging inquiry handling
 - product intent recognition
 - parameter extraction
 - multi-turn missing parameter follow-up
 - structured quote engine
+- structured pre-quote for phase-one complex packaging
 - basic shipping estimation
 - quote result output
 - knowledge-based FAQ
 - conversation storage
 - human handoff
 - basic admin visibility
+- combination quote expression for main item + sub-components
 
 ### Excluded
 - automatic review of complex design source files
+- stable automatic dieline parsing
 - full non-standard packaging quote automation
 - full ERP / OMS integration
 - fully automatic order closing
@@ -62,19 +66,25 @@ The system should:
    System may suggest lower-cost alternatives within rules.
 
 4. Customer sends design files  
-   For PDF / AI / CDR / PSD / ZIP and similar files, default to human handoff.
+   For PDF / AI / CDR / PSD / ZIP / dieline files and similar files, default to human handoff or manual review.
 
-5. Interrupted parameter collection  
+5. Phase-one complex packaging inquiry  
+   Example: customer asks for a mailer box, tuck-end box, window box, leaflet, insert, or seal sticker pre-quote.
+
+6. Combination quote inquiry  
+   Example: customer asks for one main box plus insert plus leaflet plus seal sticker in the same request.
+
+7. Interrupted parameter collection  
    If customer stops replying, mark as pending follow-up.
 
-6. Human handoff  
+8. Human handoff  
    Non-standard products, unclear requests, complaints, risky sessions, or complex files go to human staff.
 
 ## Product principles
 1. LLM does not calculate final prices directly
 2. Structured pricing engine is the source of truth for price
 3. Knowledge retrieval is only for explanation, not final quote math
-4. Complex design files are not auto-reviewed in MVP
+4. Complex design files and dieline files are not auto-reviewed in MVP
 5. Human fallback must always exist
 6. Internal sensitive data must never be exposed
 7. Platform integration must remain compliant and auditable
@@ -85,6 +95,14 @@ Current live scope in this repository:
 - flyer
 - business card
 - poster
+
+Phase-one complex packaging scope:
+- mailer_box
+- tuck_end_box
+- window_box
+- leaflet_insert
+- box_insert
+- seal_sticker
 
 Planned for later MVP expansion, but not yet implemented in the current codebase:
 - sticker
@@ -108,18 +126,42 @@ Typical parameters include:
 
 Different categories may require different parameter sets.
 
+### Complex packaging phase-one parameter examples
+
+- length / width / height
+- material and weight
+- print color / spot color
+- surface finishing
+- window size / window position / film requirement
+- die-cut, mounting, gluing and related process notes
+- quantity and packing method
+
+### Combination quote concept
+
+Phase-one complex packaging should allow one inquiry to contain:
+
+- one main package component
+- one or more sub-components
+
+Typical example:
+
+- main box + insert + leaflet + seal sticker
+
+The system should normalize this into a structured pre-quote context, but final confirmation may still require human review.
+
 ## Main system flow
 1. customer sends inquiry
 2. system identifies product type and intent
 3. system extracts structured parameters
 4. system checks missing required fields
 5. if missing, system asks follow-up questions
-6. when enough parameters are collected, system calls quote engine
-7. system returns quote result
-8. if case is risky / non-standard / file-based, hand off to human
+6. when enough parameters are collected, system calls quote engine or structured pre-quote logic
+7. system returns quote result or structured pre-quote result
+8. if case is risky / non-standard / file-based / dieline-based, hand off to human
 
 ## Human handoff triggers
 - customer sends complex design files
+- customer sends dieline PDF / AI / CDR or similar packaging files
 - request is outside standard rules
 - missing required parameters after repeated attempts
 - complaint / angry customer
@@ -187,3 +229,16 @@ Different categories may require different parameter sets.
 - better shipping logic
 - better rule management
 - feedback-driven optimization
+
+## File handling boundary
+
+### PDF as knowledge or sample material
+
+- may be used as reference or explanatory material
+- should not be treated as a stable machine-readable structure source in this phase
+
+### PDF as customer design attachment or dieline file
+
+- current product direction allows file intake and file-type recognition
+- complex design and dieline files still require manual review
+- the system should not promise stable automatic structural parsing of dieline PDFs in this phase

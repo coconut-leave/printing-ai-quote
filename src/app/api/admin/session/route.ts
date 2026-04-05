@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
+  ADMIN_ACTOR_COOKIE_NAME,
+  createAdminActorSessionValue,
+  getAdminActorCookieOptions,
+} from '@/lib/adminActorSession'
+import {
   ADMIN_ACCESS_COOKIE_NAME,
   buildAdminRedirectTarget,
   createAdminSessionToken,
@@ -28,6 +33,8 @@ function redirectToAdminAccess(request: NextRequest, params: { error?: string; m
 async function parseRequest(request: NextRequest): Promise<{
   action: 'login' | 'logout'
   secret?: string
+  actorName?: string
+  actorEmail?: string
   next?: string
   expectsJson: boolean
 }> {
@@ -38,6 +45,8 @@ async function parseRequest(request: NextRequest): Promise<{
     return {
       action: body._action === 'logout' ? 'logout' : 'login',
       secret: typeof body.secret === 'string' ? body.secret : undefined,
+      actorName: typeof body.actorName === 'string' ? body.actorName : undefined,
+      actorEmail: typeof body.actorEmail === 'string' ? body.actorEmail : undefined,
       next: typeof body.next === 'string' ? body.next : undefined,
       expectsJson: true,
     }
@@ -47,19 +56,22 @@ async function parseRequest(request: NextRequest): Promise<{
   return {
     action: formData.get('_action') === 'logout' ? 'logout' : 'login',
     secret: typeof formData.get('secret') === 'string' ? String(formData.get('secret')) : undefined,
+    actorName: typeof formData.get('actorName') === 'string' ? String(formData.get('actorName')) : undefined,
+    actorEmail: typeof formData.get('actorEmail') === 'string' ? String(formData.get('actorEmail')) : undefined,
     next: typeof formData.get('next') === 'string' ? String(formData.get('next')) : undefined,
     expectsJson: false,
   }
 }
 
 export async function POST(request: NextRequest) {
-  const { action, secret, next, expectsJson } = await parseRequest(request)
+  const { action, secret, actorName, actorEmail, next, expectsJson } = await parseRequest(request)
 
   if (action === 'logout') {
     const response = expectsJson
       ? NextResponse.json({ ok: true, message: '后台访问会话已清除。' })
       : redirectToAdminAccess(request, { message: 'logged_out' })
     response.cookies.delete(ADMIN_ACCESS_COOKIE_NAME)
+    response.cookies.delete(ADMIN_ACTOR_COOKIE_NAME)
     return response
   }
 
@@ -99,6 +111,11 @@ export async function POST(request: NextRequest) {
     ADMIN_ACCESS_COOKIE_NAME,
     await createAdminSessionToken(adminSecret),
     getAdminSessionCookieOptions()
+  )
+  response.cookies.set(
+    ADMIN_ACTOR_COOKIE_NAME,
+    createAdminActorSessionValue({ actorName, actorEmail }),
+    getAdminActorCookieOptions()
   )
 
   return response

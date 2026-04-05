@@ -1,6 +1,6 @@
 # MVP 演示流程
 
-本文档描述了 Printing AI Quote Assistant MVP 的完整演示流程。
+本文档描述了 Printing AI Quote Assistant MVP 的完整演示流程，覆盖简单品类正式报价，以及复杂包装一期的结构化预报价与人工复核路径。
 
 ## 前置准备
 
@@ -102,7 +102,51 @@ curl -X POST http://localhost:3000/api/chat \
 # 预期：生成名片报价
 ```
 
-### 2.1 推荐方案连续 patch 手动回归
+### 2.1 复杂包装一期演示
+
+以下场景用于验证复杂包装一期的文档方向：系统以结构化预报价 + 人工复核为主，不承诺复杂包装已经完全自动化。
+
+#### 飞机盒预报价演示
+```bash
+curl -X POST http://localhost:3000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"飞机盒报价，长20宽12高6cm，E坑，300g白卡，单面彩印，5000个"}'
+# 预期：进入复杂包装一期的结构化预报价或缺参追问，不应宣称已完成复杂包装全自动报价
+```
+
+#### 双插盒预报价演示
+```bash
+curl -X POST http://localhost:3000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"双插盒报价，18x8x4cm，350g白卡，四色印刷，覆哑膜，3000个"}'
+# 预期：系统整理盒型、尺寸、材料、印刷和表面处理参数，返回结构化预报价或继续补参
+```
+
+#### 开窗彩盒预报价演示
+```bash
+curl -X POST http://localhost:3000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"开窗彩盒预报价，长16宽10高5cm，开窗正面，PET贴窗，350g白卡，覆亮膜，2000个"}'
+# 预期：系统识别开窗参数，但仍按一期复杂包装口径返回预报价或人工复核提示
+```
+
+#### 说明书报价演示
+```bash
+curl -X POST http://localhost:3000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"说明书报价，A5，双面四色，157g双胶纸，5000张"}'
+# 预期：系统能整理 leaflet_insert 的尺寸、材料、印色和数量信息
+```
+
+#### 组合报价演示
+```bash
+curl -X POST http://localhost:3000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"主盒 + 内托 + 说明书 + 透明封口贴一起预报价，主盒18x12x6cm，内托白卡，说明书A5，贴纸3x3cm"}'
+# 预期：系统把主件 + 子组件整理成组合报价上下文，返回结构化预报价或人工复核提示
+```
+
+### 2.2 推荐方案连续 patch 手动回归
 
 以下 6 组脚本建议直接在首页同一个会话里手动输入，验证系统是否会先更新方案、再按明确指令进入报价链路。
 
@@ -149,14 +193,27 @@ curl -X POST http://localhost:3000/api/chat \
 4. 输入：`按这个方案报价`
 5. 预期：如果其他参数齐全则直接报价；若仍缺允许估算字段则进入 estimated，并保留哑膜配置。
 
-### 3. 测试文件型询价转人工
+### 3. 测试文件型询价与人工复核
 ```bash
 # 发送包含文件的询价
 curl -X POST http://localhost:3000/api/chat \
   -H "Content-Type: application/json" \
   -d '{"message":"我有PDF文件，想印画册，能帮我报价吗？"}'
 # 预期：系统识别文件类型，建议转人工处理
+
+# 发送复杂包装刀模文件
+curl -X POST http://localhost:3000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"我上传了飞机盒刀模 PDF，按这个文件先预报价"}'
+# 预期：复杂刀模 PDF 默认进入人工复核，不直接自动报价
 ```
+
+### 3.1 文件处理说明
+
+- PDF 作为知识资料或样例资料：可以作为案例、知识说明或样例参考，但当前阶段不承诺稳定自动结构解析
+- PDF 作为客户设计附件或刀模文件：默认进入人工复核链路
+- AI / CDR / PSD / ZIP / 刀模 PDF：默认视为文件型询价或人工复核场景
+- 当前阶段不承诺对刀模 PDF 做稳定自动结构解析
 
 ### 4. 查看会话管理
 
@@ -197,11 +254,14 @@ curl -X POST http://localhost:3000/api/conversations/{id}/handoff \
 
 ✅ **功能验收**
 - [ ] 标准品类（album/flyer/business_card/poster）报价正常
+- [ ] 复杂包装一期（mailer_box/tuck_end_box/window_box/leaflet_insert/box_insert/seal_sticker）至少完成结构化预报价或人工复核引导
+- [ ] 主件 + 子组件组合报价场景可整理成结构化上下文
 - [ ] 多轮补参流程完整
 - [ ] 参数提取准确
 - [ ] 报价计算正确
 - [ ] 会话状态流转正常
 - [ ] 人工接管功能可用
+- [ ] PDF / AI / CDR / 刀模文件默认进入人工复核，不直接自动报价
 - [ ] 报价单导出正常
 - [ ] consultation → recommendation → patch → estimated / quoted 链路正常
 - [ ] dashboard / learning-dashboard 可正常查看统计
@@ -222,6 +282,9 @@ curl -X POST http://localhost:3000/api/conversations/{id}/handoff \
 
 **Q: 为什么报价结果不准确？**
 A: 检查参数提取是否正确，可以查看会话详情中的参数信息。
+
+**Q: 复杂包装和刀模 PDF 为什么没有直接自动报价？**
+A: 复杂包装一期以结构化预报价 + 人工复核为主，复杂设计文件和刀模 PDF 默认不走稳定自动解析。
 
 **Q: 数据库连接失败？**
 A: 确认 PostgreSQL 服务正在运行，且 DATABASE_URL 配置正确。

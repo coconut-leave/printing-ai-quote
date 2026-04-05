@@ -151,6 +151,7 @@ async function main() {
     assert(consultation.intent === 'MATERIAL_CONSULTATION', 'intent 应为 MATERIAL_CONSULTATION')
     assert(consultation.status === 'consultation_reply', 'status 应为 consultation_reply')
     assert(typeof consultation.reply === 'string' && consultation.reply.length > 0, '应返回知识回复')
+    assert(consultation.reply.includes('如果这版方向合适') || consultation.reply.includes('我会先建议按'), '咨询回复应保留客服式承接')
     assert(!consultation.estimatedData, '不应直接进入 estimated')
     assert(!consultation.data, '不应直接进入 quoted 数据结构')
   })
@@ -193,6 +194,7 @@ async function main() {
 
     assert(quote.intent === 'RECOMMENDATION_CONFIRMATION', 'intent 应为 RECOMMENDATION_CONFIRMATION')
     assert(quote.status === 'estimated', 'status 应为 estimated')
+    assert(quote.reply.includes('先给您一个参考价'), 'estimated 回复应采用更自然的客服话术')
     assert(Array.isArray(quote.missingFields) && quote.missingFields.includes('printSides'), '应因缺单双面进入 estimated')
   })
 
@@ -208,6 +210,7 @@ async function main() {
 
     assert(quote.intent === 'RECOMMENDATION_CONFIRMATION', 'intent 应为 RECOMMENDATION_CONFIRMATION')
     assert(quote.status === 'quoted', 'status 应为 quoted')
+    assert(quote.reply.includes('这边先按您这版参数算好了'), 'quoted 回复应更像客服发报价')
     assert(quote.mergedParams.pageCount === 32, '应沿用推荐方案页数进入正式报价')
   })
 
@@ -223,6 +226,7 @@ async function main() {
 
     assert(patch.intent === 'PARAM_SUPPLEMENT', 'patch intent 应为 PARAM_SUPPLEMENT')
     assert(patch.status === 'recommendation_updated', 'patch status 应为 recommendation_updated')
+    assert(patch.reply.includes('好的，这版我已经按您的意思改成') || patch.reply.includes('这版方案我已经帮您更新了'), 'patch 回复应明确已更新方案')
 
     const quote = await sendChat!({
       conversationId: consultation.conversationId,
@@ -246,6 +250,7 @@ async function main() {
 
     assert(handoff.intent === 'FILE_REVIEW_REQUEST', 'intent 应为 FILE_REVIEW_REQUEST')
     assert(handoff.status === 'handoff_required', 'status 应为 handoff_required')
+    assert(handoff.reply.includes('人工同事'), 'handoff 回复应明确人工接手')
   })
 
   console.log('\n=== 测试总结 ===\n')

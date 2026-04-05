@@ -44,7 +44,7 @@ const rewriteSchema = z.object({
   topics: z.array(z.string()).default([]),
 }).strict()
 
-const KNOWLEDGE_FALLBACK_REPLY = '这个问题更偏知识说明，但当前知识库里没有足够依据给出更确定的解释。您可以补充具体用途、材质或工艺场景；如果涉及复杂文件、特殊工艺或正式交期，请转人工确认。若您想按常见做法继续估价，也可以直接告诉我数量和规格。'
+const KNOWLEDGE_FALLBACK_REPLY = '这个问题我先不乱回答，按我这边现有资料还不够支撑更确定的结论。您可以补充具体用途、材质或工艺场景；如果涉及复杂文件、特殊工艺或正式交期，我建议您转人工确认。要是您想按常见做法继续往下估，也可以直接把数量和规格发我。'
 
 let cachedOpenAIClient: OpenAI | null = null
 
@@ -96,7 +96,7 @@ function buildDeterministicAnswer(snippets: KnowledgeSnippet[]): string {
     .map((snippet) => snippet.content.trim())
     .join(' ')
 
-  return `${body} 以上仅用于材料、工艺、装订、打样、交期等解释说明，不用于最终价格、税费或运费判断；如果涉及复杂文件、特殊工艺或正式交期，请以人工确认为准。`
+  return `先按现有资料给您做个说明：${body} 这部分只用于材料、工艺、装订、打样、交期这些解释，不直接判断最终价格、税费或运费；如果碰到复杂文件、特殊工艺或正式交期，还是以人工确认更稳。`
 }
 
 async function callModel(prompt: string, maxOutputTokens: number, timeoutMs: number): Promise<string> {

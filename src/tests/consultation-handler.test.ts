@@ -38,7 +38,7 @@ test('MATERIAL_CONSULTATION: 铜版纸介绍', () => {
   assert(result?.consultationCategory === 'MATERIAL', '应返回咨询类别')
   assert(result?.hasRecommendedParams === true, '应返回是否带 recommendedParams')
   assert(result?.reply.includes('铜版纸'), '应包含铜版纸说明')
-  assert(result?.reply.includes('常见会先按') || result?.reply.includes('常见起步'), '应包含后续建议配置')
+  assert(result?.reply.includes('我会先建议按') || result?.reply.includes('这版方向合适'), '应包含更自然的后续建议配置')
   assert(Boolean(result?.recommendedParams?.recommendedParams), '应返回推荐方案参数')
 })
 
@@ -84,8 +84,66 @@ test('SPEC_RECOMMENDATION: A4 画册页数建议', () => {
 
 test('SOLUTION_RECOMMENDATION: 标准方案推荐', () => {
   const result = handleConsultationIntent('SOLUTION_RECOMMENDATION', '推荐一个常见标准方案')
-  assert(result?.reply.includes('常见标准方案') || result?.reply.includes('常见会先按'), '应返回方案推荐')
+  assert(result?.reply.includes('我会先建议按') || result?.reply.includes('按这个方案报价'), '应返回更自然的方案推荐')
   assert(result?.recommendedParams?.productType === 'album', '应返回结构化标准方案')
+})
+
+test('SOLUTION_RECOMMENDATION: 包装盒型咨询应给出多方向建议并承接到包装方案', () => {
+  const result = handleConsultationIntent('SOLUTION_RECOMMENDATION', '我的产品适合什么盒型？')
+  assert(result?.status === 'consultation_reply', '应返回 consultation_reply')
+  assert(result?.consultationCategory === 'PACKAGING', '应命中包装咨询兜底')
+  assert(result?.reply.includes('双插盒') && result?.reply.includes('飞机盒'), '应返回多方向盒型建议')
+  assert(result?.reply.includes('开窗彩盒'), '应覆盖展示型包装方向')
+  assert(result?.productType === undefined, '泛包装咨询不应过早绑定单一盒型')
+  assert(result?.hasRecommendedParams === false, '泛包装咨询不应伪造已确认方案')
+  assert(Array.isArray(result?.candidateProductTypes) && result?.candidateProductTypes?.length === 3, '应返回多个候选盒型方向')
+})
+
+test('SPEC_RECOMMENDATION: 发快递的包装咨询应承接到飞机盒', () => {
+  const result = handleConsultationIntent('SPEC_RECOMMENDATION', '要发快递的话盒子怎么选？')
+  assert(result?.status === 'consultation_reply', '应返回 consultation_reply')
+  assert(result?.productType === 'mailer_box', '应识别到飞机盒方向')
+  assert(result?.hasRecommendedParams === false, '场景咨询不应直接伪造完整推荐方案')
+  assert(result?.reply.includes('飞机盒'), '应说明飞机盒更适合运输场景')
+  assert(result?.reply.includes('裱、啤') || result?.reply.includes('结构强度'), '应包含更具体的常见做法说明')
+})
+
+test('SOLUTION_RECOMMENDATION: 咨询式飞机盒问价应先给常见做法和价格影响因素', () => {
+  const result = handleConsultationIntent('SOLUTION_RECOMMENDATION', '飞机盒一般怎么报价？')
+  assert(result?.status === 'consultation_reply', '应返回 consultation_reply')
+  assert(result?.productType === 'mailer_box', '应识别为飞机盒咨询')
+  assert(result?.reply.includes('常见做法') || result?.reply.includes('基础工艺'), '应先说明常见做法')
+  assert(result?.reply.includes('价格通常主要受'), '应说明价格影响因素')
+  assert(result?.reply.includes('尺寸') && result?.reply.includes('数量'), '应顺势引导继续补参')
+})
+
+test('SOLUTION_RECOMMENDATION: 护肤品纸盒用途咨询应给出 2 到 3 个方向而不直接报价', () => {
+  const result = handleConsultationIntent('SOLUTION_RECOMMENDATION', '我想做一个纸盒装护肤品，你们一般推荐什么')
+  assert(result?.status === 'consultation_reply', '应返回 consultation_reply')
+  assert(result?.productType === undefined, '用途咨询阶段不应锁定单一盒型')
+  assert(result?.reply.includes('双插盒'), '应包含双插盒方向')
+  assert(result?.reply.includes('开窗彩盒'), '应包含开窗彩盒方向')
+  assert(result?.reply.includes('飞机盒'), '应保留发货保护方向')
+  assert(result?.reply.includes('预算') && result?.reply.includes('展示'), '应继续追问预算和展示偏好')
+  assert(result?.hasRecommendedParams === false, '用途咨询阶段不应伪造推荐参数')
+})
+
+test('SOLUTION_RECOMMENDATION: 外包装泛需求应返回泛包装推荐咨询', () => {
+  const result = handleConsultationIntent('SOLUTION_RECOMMENDATION', '我想要个外包装推荐')
+  assert(result?.status === 'consultation_reply', '应返回 consultation_reply')
+  assert(result?.productType === undefined, '泛需求不应锁定单一盒型')
+  assert(Array.isArray(result?.candidateProductTypes) && result?.candidateProductTypes?.length === 3, '应返回多个候选盒型')
+  assert(result?.reply.includes('飞机盒') && result?.reply.includes('双插盒') && result?.reply.includes('开窗彩盒'), '应返回常见盒型方向')
+  assert(result?.reply.includes('用途') || result?.reply.includes('尺寸'), '应继续引导补充用途和尺寸')
+})
+
+test('SOLUTION_RECOMMENDATION: 外包装预算咨询应继续给控成本方向建议', () => {
+  const result = handleConsultationIntent('SOLUTION_RECOMMENDATION', '我想做个外包装，预算不要太高')
+  assert(result?.status === 'consultation_reply', '应返回 consultation_reply')
+  assert(result?.productType === undefined, '预算咨询阶段不应锁定单一盒型')
+  assert(result?.reply.includes('双插盒'), '应优先给出控成本常见方向')
+  assert(result?.reply.includes('飞机盒'), '仍应保留运输保护方向')
+  assert(result?.reply.includes('预算区间'), '应继续引导补充预算区间')
 })
 
 test('MATERIAL_CONSULTATION: 海报纸张问题应返回海报起步建议', () => {

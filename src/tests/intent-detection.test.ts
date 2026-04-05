@@ -250,6 +250,51 @@ test('SOLUTION_RECOMMENDATION: 方案推荐咨询', () => {
   assert(result.intent === 'SOLUTION_RECOMMENDATION', '应识别为 SOLUTION_RECOMMENDATION')
 })
 
+test('SOLUTION_RECOMMENDATION: 咨询式飞机盒问价不应直接识别为完整报价', () => {
+  const result = detectIntent({ message: '你们的飞机盒怎么卖' })
+  assert(result.intent === 'SOLUTION_RECOMMENDATION', '咨询式飞机盒问价应先识别为方案咨询')
+})
+
+test('SOLUTION_RECOMMENDATION: 飞机盒一般怎么报价应继续识别为咨询型问法', () => {
+  const result = detectIntent({ message: '飞机盒一般怎么报价' })
+  assert(result.intent === 'SOLUTION_RECOMMENDATION', '飞机盒一般怎么报价应先识别为方案咨询')
+})
+
+test('SOLUTION_RECOMMENDATION: 纸盒用途咨询不应直接进入预报价', () => {
+  const result = detectIntent({ message: '我想做一个纸盒装护肤品，你们一般推荐什么' })
+  assert(result.intent === 'SOLUTION_RECOMMENDATION', '用途型纸盒咨询应先识别为方案推荐')
+})
+
+test('SOLUTION_RECOMMENDATION: 外包装泛需求应进入推荐咨询', () => {
+  const result = detectIntent({ message: '我想要个外包装推荐' })
+  assert(result.intent === 'SOLUTION_RECOMMENDATION', '外包装泛需求应识别为方案推荐')
+})
+
+test('SOLUTION_RECOMMENDATION: 包装预算咨询应继续留在推荐层', () => {
+  const result = detectIntent({ message: '我想做个外包装，预算不要太高' })
+  assert(result.intent === 'SOLUTION_RECOMMENDATION', '包装预算咨询应继续留在推荐层')
+})
+
+test('SOLUTION_RECOMMENDATION: 泛包装推荐问法应继续识别为推荐咨询', () => {
+  const result = detectIntent({ message: '我想做个包装，你们一般有什么推荐' })
+  assert(result.intent === 'SOLUTION_RECOMMENDATION', '泛包装推荐问法应识别为推荐咨询')
+})
+
+test('SOLUTION_RECOMMENDATION: 装小卡片和赠品的盒型选择应进入推荐咨询', () => {
+  const result = detectIntent({ message: '我要装小卡片和赠品，盒子怎么选' })
+  assert(result.intent === 'SOLUTION_RECOMMENDATION', '泛包装盒型选择应识别为方案推荐')
+})
+
+test('SOLUTION_RECOMMENDATION: 泛纸盒方案咨询应优先进入推荐式承接', () => {
+  const result = detectIntent({ message: '我想做个纸盒，有哪些能做' })
+  assert(result.intent === 'SOLUTION_RECOMMENDATION', '泛纸盒方案咨询应优先识别为方案咨询')
+})
+
+test('SOLUTION_RECOMMENDATION: 泛纸箱推荐咨询不应掉回完整报价意图', () => {
+  const result = detectIntent({ message: '我想做一个纸箱，你有什么推荐' })
+  assert(result.intent === 'SOLUTION_RECOMMENDATION', '泛纸箱推荐咨询应优先识别为方案咨询')
+})
+
 console.log('\n=== 测试总结 ===\n')
 const passed = results.filter((r) => r.passed).length
 const total = results.length

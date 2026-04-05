@@ -1,17 +1,45 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { AdminPageNav } from '@/components/AdminPageNav'
-import { REFLECTION_ISSUE_TYPE_OPTIONS, getReflectionIssueTypeLabel } from '@/lib/reflection/issueTypes'
+import { PackagingCorrectedParamsEditor } from '@/components/PackagingCorrectedParamsEditor'
+import { PackagingReflectionDiff } from '@/components/PackagingReflectionDiff'
+import { buildReflectionContextSummary } from '@/lib/reflection/context'
+import {
+  buildPackagingDraftSeed,
+  resolvePackagingDraftOnIssueTypeChange,
+} from '@/lib/reflection/packagingEditorState'
+import {
+  addPackagingDraftReviewReason,
+  addPackagingDraftSubItem,
+  buildPackagingCorrectedParamsPayload,
+  removePackagingDraftReviewReason,
+  removePackagingDraftSubItem,
+  updatePackagingDraftMainItem,
+  updatePackagingDraftRequiresHumanReview,
+  updatePackagingDraftReviewReason,
+  updatePackagingDraftSubItem,
+  type PackagingCorrectedParamsDraft,
+} from '@/lib/reflection/packagingCorrectedParams'
+import {
+  REFLECTION_ISSUE_TYPE_OPTIONS,
+  getReflectionIssueTypeLabel,
+  isPackagingReflectionIssueType,
+  isReflectionIssueType,
+  type ReflectionIssueType,
+} from '@/lib/reflection/issueTypes'
 
 interface ReflectionRecord {
   id: number
   conversationId: number
   quoteId?: number
-  issueType: string
+  issueType: ReflectionIssueType
   reflectionText: string
   suggestionDraft: string
+  originalExtractedParams?: Record<string, any> | null
+  correctedParams?: Record<string, any> | null
+  correctedQuoteSummary?: string | null
   status: string
   createdAt: string
   conversation: {
@@ -52,8 +80,18 @@ export default function ReflectionsPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [updatingId, setUpdatingId] = useState<number | null>(null)
+  const [savingId, setSavingId] = useState<number | null>(null)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editingIssueType, setEditingIssueType] = useState<ReflectionIssueType>('PARAM_WRONG')
+  const [editingCorrectedParamsText, setEditingCorrectedParamsText] = useState('')
+  const [editingCorrectedQuoteSummary, setEditingCorrectedQuoteSummary] = useState('')
+  const [editingPackagingDraft, setEditingPackagingDraft] = useState<PackagingCorrectedParamsDraft | null>(null)
+  const [editingError, setEditingError] = useState<string | null>(null)
+  const [editingSuccess, setEditingSuccess] = useState<string | null>(null)
 
   const limit = 20
+  const editingRecord = editingId === null ? null : records.find((record) => record.id === editingId) || null
+  const showPackagingTemplate = isPackagingReflectionIssueType(editingIssueType) && Boolean(editingPackagingDraft)
 
   useEffect(() => {
     fetchRecords()
@@ -131,6 +169,154 @@ export default function ReflectionsPage() {
     }
   }
 
+  function resetEditingState() {
+    setEditingId(null)
+    setEditingIssueType('PARAM_WRONG')
+    setEditingCorrectedParamsText('')
+    setEditingCorrectedQuoteSummary('')
+    setEditingPackagingDraft(null)
+    setEditingError(null)
+    setEditingSuccess(null)
+  }
+
+  function startEditing(record: ReflectionRecord) {
+    if (editingId === record.id) {
+      resetEditingState()
+      return
+    }
+
+    setEditingId(record.id)
+    setEditingIssueType(record.issueType)
+    setEditingCorrectedParamsText(record.correctedParams ? JSON.stringify(record.correctedParams, null, 2) : '')
+    setEditingCorrectedQuoteSummary(record.correctedQuoteSummary || '')
+    setEditingPackagingDraft(buildPackagingDraftSeed({
+      issueType: record.issueType,
+      originalExtractedParams: record.originalExtractedParams,
+      correctedParams: record.correctedParams,
+    }))
+    setEditingError(null)
+    setEditingSuccess(null)
+  }
+
+  function handleEditingIssueTypeChange(value: string) {
+    if (!isReflectionIssueType(value)) {
+      return
+    }
+
+    setEditingIssueType(value)
+    setEditingSuccess(null)
+    setEditingPackagingDraft((current) => resolvePackagingDraftOnIssueTypeChange({
+      nextIssueType: value,
+      currentDraft: current,
+      seedDraft: editingRecord
+        ? buildPackagingDraftSeed({
+            issueType: value,
+            originalExtractedParams: editingRecord.originalExtractedParams,
+            correctedParams: editingRecord.correctedParams,
+          })
+        : null,
+    }))
+  }
+
+  async function saveEditingRecord() {
+    if (!editingRecord || savingId === editingRecord.id) {
+      return
+    }
+
+    let correctedParams: Record<string, any> | null = null
+
+    if (showPackagingTemplate && editingPackagingDraft) {
+      correctedParams = buildPackagingCorrectedParamsPayload(editingPackagingDraft)
+    } else if (editingCorrectedParamsText.trim()) {
+      try {
+        correctedParams = JSON.parse(editingCorrectedParamsText)
+      } catch {
+        setEditingError('修正参数 JSON 格式无效')
+        return
+      }
+    }
+
+    try {
+      setSavingId(editingRecord.id)
+      setEditingError(null)
+      setEditingSuccess(null)
+
+      const res = await fetch(`/api/reflections/${editingRecord.id}/review`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          issueType: editingIssueType,
+          correctedParams,
+          correctedQuoteSummary: editingCorrectedQuoteSummary.trim() || null,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok || !data.ok) {
+        setEditingError(data.error || '保存修正失败')
+        return
+      }
+
+      setRecords((prev) => prev.map((record) => (
+        record.id === editingRecord.id
+          ? {
+              ...record,
+              ...data.data,
+              issueType: editingIssueType,
+              correctedParams,
+              correctedQuoteSummary: editingCorrectedQuoteSummary.trim() || null,
+            }
+          : record
+      )))
+      setEditingCorrectedParamsText(correctedParams ? JSON.stringify(correctedParams, null, 2) : '')
+      setEditingPackagingDraft(buildPackagingDraftSeed({
+        issueType: editingIssueType,
+        originalExtractedParams: editingRecord.originalExtractedParams,
+        correctedParams,
+      }))
+      setEditingSuccess('已保存，可继续编辑。')
+      await fetchStats()
+    } catch (error) {
+      console.error('Failed to save reflection edit:', error)
+      setEditingError('保存修正失败')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  const handleMainItemFieldChange = (field: string, value: unknown) => {
+    setEditingPackagingDraft((current) => (current ? updatePackagingDraftMainItem(current, field, value) : current))
+  }
+
+  const handleSubItemFieldChange = (index: number, field: string, value: unknown) => {
+    setEditingPackagingDraft((current) => (current ? updatePackagingDraftSubItem(current, index, field, value) : current))
+  }
+
+  const handleAddSubItem = (productType: string) => {
+    setEditingPackagingDraft((current) => (current ? addPackagingDraftSubItem(current, productType as any) : current))
+  }
+
+  const handleRemoveSubItem = (index: number) => {
+    setEditingPackagingDraft((current) => (current ? removePackagingDraftSubItem(current, index) : current))
+  }
+
+  const handleReviewReasonChange = (index: number, field: 'label' | 'message', value: string) => {
+    setEditingPackagingDraft((current) => (current ? updatePackagingDraftReviewReason(current, index, field, value) : current))
+  }
+
+  const handleAddReviewReason = () => {
+    setEditingPackagingDraft((current) => (current ? addPackagingDraftReviewReason(current) : current))
+  }
+
+  const handleRemoveReviewReason = (index: number) => {
+    setEditingPackagingDraft((current) => (current ? removePackagingDraftReviewReason(current, index) : current))
+  }
+
+  const handleRequiresHumanReviewChange = (value: boolean) => {
+    setEditingPackagingDraft((current) => (current ? updatePackagingDraftRequiresHumanReview(current, value) : current))
+  }
+
   const getStatusBadgeClass = (status: string) => {
     const baseClass = 'px-2 py-1 rounded text-xs font-medium'
     switch (status) {
@@ -149,6 +335,10 @@ export default function ReflectionsPage() {
 
   const getIssueTypeBadgeClass = (type: string) => {
     const baseClass = 'px-2 py-1 rounded text-xs font-medium'
+    if (isPackagingReflectionIssueType(type)) {
+      return `${baseClass} bg-sky-100 text-sky-800`
+    }
+
     switch (type) {
       case 'PARAM_MISSING':
         return `${baseClass} bg-orange-100 text-orange-800`
@@ -346,84 +536,221 @@ export default function ReflectionsPage() {
                   </tr>
                 ) : (
                   records.map((record) => (
-                    <tr key={record.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {record.id}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <Link
-                          href={`/conversations/${record.conversationId}`}
-                          className="text-blue-600 hover:underline"
-                        >
-                          #{record.conversationId}
-                        </Link>
-                        {record.conversation.customerName && (
-                          <p className="text-xs text-gray-500">
-                            {record.conversation.customerName}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <span className={getIssueTypeBadgeClass(record.issueType)}>
-                          {getReflectionIssueTypeLabel(record.issueType)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate">
-                        {record.reflectionText}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate">
-                        {record.suggestionDraft}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <span className={getStatusBadgeClass(record.status)}>
-                          {record.status === 'NEW'
-                            ? '未审核'
-                            : record.status === 'REVIEWED'
-                            ? '已审核'
-                            : record.status === 'APPROVED'
-                            ? '已批准'
-                            : '已拒绝'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        {record.status === 'NEW' && (
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => updateStatus(record.id, 'REVIEWED')}
-                              disabled={updatingId === record.id}
-                              className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 disabled:opacity-50"
-                            >
-                              审核
-                            </button>
-                            <button
-                              onClick={() => updateStatus(record.id, 'APPROVED')}
-                              disabled={updatingId === record.id}
-                              className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 disabled:opacity-50"
-                            >
-                              批准
-                            </button>
+                    <Fragment key={record.id}>
+                      <tr className="hover:bg-gray-50 align-top">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          {record.id}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <Link
+                            href={`/conversations/${record.conversationId}`}
+                            className="text-blue-600 hover:underline"
+                          >
+                            #{record.conversationId}
+                          </Link>
+                          {record.conversation.customerName && (
+                            <p className="text-xs text-gray-500">
+                              {record.conversation.customerName}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <span className={getIssueTypeBadgeClass(record.issueType)}>
+                            {getReflectionIssueTypeLabel(record.issueType)}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate">
+                          <div className="max-w-xs whitespace-pre-wrap">{record.reflectionText}</div>
+                          {buildReflectionContextSummary(record.originalExtractedParams, record.correctedParams) && (
+                            <p className="mt-2 text-xs text-slate-500 whitespace-pre-wrap">
+                              {buildReflectionContextSummary(record.originalExtractedParams, record.correctedParams)}
+                            </p>
+                          )}
+                          {record.correctedQuoteSummary && (
+                            <p className="mt-2 text-xs text-slate-500 whitespace-pre-wrap">
+                              修正摘要：{record.correctedQuoteSummary}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate">
+                          <div className="max-w-xs whitespace-pre-wrap">{record.suggestionDraft}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <span className={getStatusBadgeClass(record.status)}>
+                            {record.status === 'NEW'
+                              ? '未审核'
+                              : record.status === 'REVIEWED'
+                              ? '已审核'
+                              : record.status === 'APPROVED'
+                              ? '已批准'
+                              : '已拒绝'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <div className="flex flex-wrap gap-2">
+                            {record.status === 'NEW' && (
+                              <>
+                                <button
+                                  onClick={() => updateStatus(record.id, 'REVIEWED')}
+                                  disabled={updatingId === record.id}
+                                  className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 disabled:opacity-50"
+                                >
+                                  审核
+                                </button>
+                                <button
+                                  onClick={() => updateStatus(record.id, 'APPROVED')}
+                                  disabled={updatingId === record.id}
+                                  className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 disabled:opacity-50"
+                                >
+                                  批准
+                                </button>
+                              </>
+                            )}
+                            {record.status === 'REVIEWED' && (
+                              <>
+                                <button
+                                  onClick={() => updateStatus(record.id, 'APPROVED')}
+                                  disabled={updatingId === record.id}
+                                  className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 disabled:opacity-50"
+                                >
+                                  批准
+                                </button>
+                                <button
+                                  onClick={() => updateStatus(record.id, 'REJECTED')}
+                                  disabled={updatingId === record.id}
+                                  className="px-2 py-1 text-xs bg-red-50 text-red-700 rounded hover:bg-red-100 disabled:opacity-50"
+                                >
+                                  拒绝
+                                </button>
+                              </>
+                            )}
+                            {isPackagingReflectionIssueType(record.issueType) && (
+                              <button
+                                onClick={() => startEditing(record)}
+                                className="px-2 py-1 text-xs bg-slate-100 text-slate-700 rounded hover:bg-slate-200"
+                              >
+                                {editingId === record.id ? '收起编辑' : '编辑修正'}
+                              </button>
+                            )}
                           </div>
-                        )}
-                        {record.status === 'REVIEWED' && (
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => updateStatus(record.id, 'APPROVED')}
-                              disabled={updatingId === record.id}
-                              className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 disabled:opacity-50"
-                            >
-                              批准
-                            </button>
-                            <button
-                              onClick={() => updateStatus(record.id, 'REJECTED')}
-                              disabled={updatingId === record.id}
-                              className="px-2 py-1 text-xs bg-red-50 text-red-700 rounded hover:bg-red-100 disabled:opacity-50"
-                            >
-                              拒绝
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
+                        </td>
+                      </tr>
+
+                      {(() => {
+                        const showDiff = isPackagingReflectionIssueType(record.issueType) && Boolean(record.originalExtractedParams) && Boolean(record.correctedParams)
+                        if (!showDiff) {
+                          return null
+                        }
+
+                        return (
+                          <tr className="bg-slate-50/70">
+                            <td colSpan={7} className="px-6 py-4">
+                              <PackagingReflectionDiff
+                                issueType={record.issueType}
+                                originalExtractedParams={record.originalExtractedParams}
+                                correctedParams={record.correctedParams}
+                              />
+                            </td>
+                          </tr>
+                        )
+                      })()}
+
+                      {editingId === record.id && (
+                        <tr className="bg-slate-50">
+                          <td colSpan={7} className="px-6 py-5">
+                            <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-4">
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <h3 className="text-base font-semibold text-slate-900">保存后再编辑</h3>
+                                  <p className="mt-1 text-sm text-slate-500">审核页直接复用包装 correctedParams 编辑器；保存后再次进入会加载已保存结构继续编辑。</p>
+                                </div>
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={saveEditingRecord}
+                                    disabled={savingId === record.id}
+                                    className="rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                                  >
+                                    {savingId === record.id ? '保存中...' : '保存修正'}
+                                  </button>
+                                  <button
+                                    onClick={resetEditingState}
+                                    disabled={savingId === record.id}
+                                    className="rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                                  >
+                                    取消
+                                  </button>
+                                </div>
+                              </div>
+
+                              {editingError && (
+                                <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                                  {editingError}
+                                </div>
+                              )}
+
+                              {editingSuccess && (
+                                <div className="rounded border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                                  {editingSuccess}
+                                </div>
+                              )}
+
+                              <label className="text-sm">
+                                <span className="mb-1 block font-medium text-slate-700">问题类型</span>
+                                <select
+                                  value={editingIssueType}
+                                  onChange={(event) => handleEditingIssueTypeChange(event.target.value)}
+                                  className="w-full rounded border border-gray-300 px-3 py-2"
+                                >
+                                  {REFLECTION_ISSUE_TYPE_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                  ))}
+                                </select>
+                              </label>
+
+                              <label className="text-sm">
+                                <span className="mb-1 block font-medium text-slate-700">修正参数</span>
+                                {showPackagingTemplate && editingPackagingDraft ? (
+                                  <PackagingCorrectedParamsEditor
+                                    issueType={editingIssueType}
+                                    draft={editingPackagingDraft}
+                                    onMainItemFieldChange={handleMainItemFieldChange}
+                                    onSubItemFieldChange={handleSubItemFieldChange}
+                                    onAddSubItem={handleAddSubItem}
+                                    onRemoveSubItem={handleRemoveSubItem}
+                                    onReviewReasonChange={handleReviewReasonChange}
+                                    onAddReviewReason={handleAddReviewReason}
+                                    onRemoveReviewReason={handleRemoveReviewReason}
+                                    onRequiresHumanReviewChange={handleRequiresHumanReviewChange}
+                                  />
+                                ) : (
+                                  <textarea
+                                    value={editingCorrectedParamsText}
+                                    onChange={(event) => setEditingCorrectedParamsText(event.target.value)}
+                                    rows={8}
+                                    placeholder='例如：{"pageCount": 32, "innerWeight": 157}'
+                                    className="w-full rounded border px-3 py-2 font-mono text-xs"
+                                  />
+                                )}
+                              </label>
+
+                              {isPackagingReflectionIssueType(editingIssueType) && !showPackagingTemplate && (
+                                <p className="text-xs text-amber-700">当前问题类型属于包装反思，但这条记录没有可复用的 complex packaging 上下文，已回退为 JSON 编辑。</p>
+                              )}
+
+                              <label className="text-sm">
+                                <span className="mb-1 block font-medium text-slate-700">修正后报价摘要</span>
+                                <input
+                                  value={editingCorrectedQuoteSummary}
+                                  onChange={(event) => setEditingCorrectedQuoteSummary(event.target.value)}
+                                  placeholder='例如：人工复核后保留预报价并补齐开窗尺寸'
+                                  className="w-full rounded border px-3 py-2 text-sm"
+                                />
+                              </label>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))
                 )}
               </tbody>

@@ -32,6 +32,42 @@ const PRODUCT_CATEGORY_DEFINITIONS: Record<ProductType, ProductCategoryDefinitio
     name: 'Poster',
     description: 'Poster standard category',
   },
+  mailer_box: {
+    productType: 'mailer_box',
+    slug: 'mailer-box',
+    name: 'Mailer Box',
+    description: 'Phase-one complex packaging mailer box category',
+  },
+  tuck_end_box: {
+    productType: 'tuck_end_box',
+    slug: 'tuck-end-box',
+    name: 'Tuck End Box',
+    description: 'Phase-one complex packaging tuck end box category',
+  },
+  window_box: {
+    productType: 'window_box',
+    slug: 'window-box',
+    name: 'Window Box',
+    description: 'Phase-one complex packaging window box category',
+  },
+  leaflet_insert: {
+    productType: 'leaflet_insert',
+    slug: 'leaflet-insert',
+    name: 'Leaflet Insert',
+    description: 'Phase-one complex packaging leaflet insert category',
+  },
+  box_insert: {
+    productType: 'box_insert',
+    slug: 'box-insert',
+    name: 'Box Insert',
+    description: 'Phase-one complex packaging box insert category',
+  },
+  seal_sticker: {
+    productType: 'seal_sticker',
+    slug: 'seal-sticker',
+    name: 'Seal Sticker',
+    description: 'Phase-one complex packaging seal sticker category',
+  },
 }
 
 const LEGACY_PRODUCT_CATEGORY_MATCHES: Record<ProductType, { slugs: string[]; names: string[] }> = {
@@ -50,6 +86,30 @@ const LEGACY_PRODUCT_CATEGORY_MATCHES: Record<ProductType, { slugs: string[]; na
   poster: {
     slugs: [],
     names: ['Poster'],
+  },
+  mailer_box: {
+    slugs: ['mailer_box'],
+    names: ['Mailer Box', 'mailer_box'],
+  },
+  tuck_end_box: {
+    slugs: ['tuck_end_box'],
+    names: ['Tuck End Box', 'tuck_end_box'],
+  },
+  window_box: {
+    slugs: ['window_box'],
+    names: ['Window Box', 'window_box'],
+  },
+  leaflet_insert: {
+    slugs: ['leaflet_insert'],
+    names: ['Leaflet Insert', 'leaflet_insert'],
+  },
+  box_insert: {
+    slugs: ['box_insert'],
+    names: ['Box Insert', 'box_insert'],
+  },
+  seal_sticker: {
+    slugs: ['seal_sticker'],
+    names: ['Seal Sticker', 'seal_sticker'],
   },
 }
 

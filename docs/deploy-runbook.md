@@ -8,9 +8,12 @@
 
 ## 1. 适用范围
 
-- 当前 live scope：album / flyer / business_card / poster
+- 当前简单品类主链路：album / flyer / business_card / poster
+- 当前复杂包装一期方向：mailer_box / tuck_end_box / window_box / leaflet_insert / box_insert / seal_sticker
+- 复杂包装一期以结构化预报价 + 人工复核为主，不承诺已完成复杂包装全自动报价
 - 当前后台页和管理 API 使用 `ADMIN_SECRET` 做最小访问保护
 - 当前不包含完整账号体系、SSO、复杂权限系统、Docker 编排和多节点部署
+- 当前不包含复杂设计文件或刀模文件的稳定自动结构解析
 
 ## 2. 环境要求
 
@@ -193,10 +196,17 @@ ADMIN_SECRET="$ADMIN_SECRET" BASE_URL=http://127.0.0.1:3000 bash scripts/admin-a
 5. `/dashboard`、`/conversations`、`/learning-dashboard` 需在授权后才能访问
 6. 报价单导出接口 `/api/quotes/[id]/export` 需在授权后才能访问
 7. album / flyer / business_card / poster 各完成 1 条最小询价验证
-8. 反思 / improvements / learning dashboard 能正常打开并返回数据
-9. Dashboard 至少确认 `quoted`、`missing_fields`、`handoff_required`、`consultation → recommendation_confirmation / quoted` 指标口径正常
+8. 复杂包装一期至少完成 1 条盒型预报价验证、1 条组合报价验证、1 条 PDF / 刀模文件人工复核验证
+9. 反思 / improvements / learning dashboard 能正常打开并返回数据
+10. Dashboard 至少确认 `quoted`、`missing_fields`、`handoff_required`、`consultation → recommendation_confirmation / quoted` 指标口径正常
 
-## 9.1 Quote 分类落库抽查
+## 9.1 文件处理边界抽查
+
+- PDF 作为知识资料或样例资料时，不应被文档写成稳定自动结构解析能力
+- PDF / AI / CDR / 刀模文件作为客户设计附件时，默认进入人工复核链路
+- 发布后至少抽查 1 条复杂包装刀模 PDF 场景，确认系统不直接承诺自动最终报价
+
+## 9.2 Quote 分类落库抽查
 
 当前新 Quote 的 canonical productCategory 口径为：
 
@@ -217,7 +227,7 @@ npx prisma studio
 
 确认 `Quote.productCategoryId` 指向的 `ProductCategory.slug` 为 `brochure` / `flyer` / `business-card` / `poster` 之一。
 
-## 9.2 Learning 边界
+## 9.3 Learning 边界
 
 - reflection 记录存数据库，可持久化
 - improvement 列表由 approved reflections 动态派生
@@ -226,13 +236,13 @@ npx prisma studio
 
 因此，learning 相关页面当前只适合作为演示和人工研判辅助，不应当作正式持久化工单系统或对外承诺的长期统计台账。
 
-## 9.3 Seed 限制
+## 9.4 Seed 限制
 
 - 默认不要在生产环境执行 `npm run seed`
 - 当前仓库只允许显式执行 `ALLOW_SEED=true npm run seed:prod:allow`
 - 这只适用于明确的一次性初始化，不应作为常规发布步骤
 
-## 9.4 最小错误日志口径
+## 9.5 最小错误日志口径
 
 - 当前关键运营 API 建议至少观察这些 context：`health-check-database`、`dashboard-stats`、`learning-dashboard-stats`、`consultation-tracking-stats`
 - 路由异常统一通过 `src/server/api/response.ts` 输出时间戳 + level + context，便于上线后按接口定位问题

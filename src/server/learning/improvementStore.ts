@@ -36,8 +36,13 @@ if (!global.__improvementStoreState) {
   global.__improvementStoreState = store
 }
 
-function markAction(improvementId: string): void {
-  store.lastActionAt.set(improvementId, new Date().toISOString())
+function toIsoString(at?: Date | string): string {
+  if (!at) return new Date().toISOString()
+  return at instanceof Date ? at.toISOString() : new Date(at).toISOString()
+}
+
+function markAction(improvementId: string, at?: Date | string): void {
+  store.lastActionAt.set(improvementId, toIsoString(at))
 }
 
 /**
@@ -45,16 +50,17 @@ function markAction(improvementId: string): void {
  */
 export function setImprovementStatus(
   improvementId: string,
-  status: ImprovementSuggestionStatus
+  status: ImprovementSuggestionStatus,
+  at?: Date | string
 ): void {
   store.statuses.set(improvementId, status)
   if (status === 'IMPLEMENTED' && !store.implementedAt.has(improvementId)) {
-    store.implementedAt.set(improvementId, new Date().toISOString())
+    store.implementedAt.set(improvementId, toIsoString(at))
   }
   if (status === 'VERIFIED' && !store.verifiedAt.has(improvementId)) {
-    store.verifiedAt.set(improvementId, new Date().toISOString())
+    store.verifiedAt.set(improvementId, toIsoString(at))
   }
-  markAction(improvementId)
+  markAction(improvementId, at)
 }
 
 /**

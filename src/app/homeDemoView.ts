@@ -30,7 +30,9 @@ function getProductType(result: DemoResult): string | undefined {
   return result?.mergedRecommendedParams?.productType
     || result?.recommendedParams?.productType
     || result?.mergedParams?.productType
+    || result?.estimatedData?.normalizedParams?.productType
     || result?.data?.normalizedParams?.productType
+    || result?.data?.mainItem?.normalizedParams?.productType
     || getRecommendedPayload(result)?.productType
 }
 

@@ -49,45 +49,66 @@ function decideMainRoute(message: string, mergedParams: Record<string, any>) {
 
 console.log('\n=== 统一报价策略四路径回归测试 ===\n')
 
-test('规则快照: 必须包含 4 个标准品类', () => {
+test('规则快照: 活跃自动报价范围必须只包含一期复杂包装品类', () => {
   const snapshot = getWorkflowRulesSnapshot()
   const productTypes = snapshot.map((item) => item.productType)
-  assert(snapshot.length === 4, '应包含 4 个标准品类规则')
-  assert(productTypes.includes('album'), '应包含 album 规则')
-  assert(productTypes.includes('flyer'), '应包含 flyer 规则')
-  assert(productTypes.includes('business_card'), '应包含 business_card 规则')
-  assert(productTypes.includes('poster'), '应包含 poster 规则')
+  assert(snapshot.length === 6, '应只包含 6 个当前活跃自动报价品类规则')
+  assert(productTypes.includes('mailer_box'), '应包含 mailer_box 规则')
+  assert(productTypes.includes('tuck_end_box'), '应包含 tuck_end_box 规则')
+  assert(productTypes.includes('window_box'), '应包含 window_box 规则')
+  assert(productTypes.includes('leaflet_insert'), '应包含 leaflet_insert 规则')
+  assert(productTypes.includes('box_insert'), '应包含 box_insert 规则')
+  assert(productTypes.includes('seal_sticker'), '应包含 seal_sticker 规则')
 })
 
-test('quoted: 参数齐全应进入 quoted', () => {
+test('quoted: 支持的一期复杂包装参数齐全应进入 quoted', () => {
   const mergedParams = {
-    productType: 'flyer',
-    finishedSize: 'A4',
+    productType: 'mailer_box',
     quantity: 5000,
-    paperType: 'coated',
-    paperWeight: 157,
-    printSides: 'double',
+    material: 'white_card',
+    weight: 300,
+    printColor: 'four_color',
+    length: 20,
+    width: 12,
+    height: 6,
   }
-  const { missingFields, decision } = decideMainRoute('我要印A4传单，5000份，双面彩印', mergedParams)
+  const { missingFields, decision } = decideMainRoute('飞机盒报价，20*12*6cm，300克白卡，四色印刷，5000个', mergedParams)
 
   assert(missingFields.length === 0, 'quoted 样例不应存在缺失字段')
   assert(decision.status === 'quoted', '状态应为 quoted')
   assert(decision.reason === 'all_required_fields_present', 'reason 应为 all_required_fields_present')
 })
 
-test('estimated: 允许缺失集合应进入 estimated', () => {
+test('estimated: 支持的一期复杂包装允许缺失集合应进入 estimated', () => {
   const mergedParams = {
-    productType: 'flyer',
-    finishedSize: 'A4',
-    quantity: 5000,
-    paperType: 'coated',
-    paperWeight: 157,
+    productType: 'window_box',
+    quantity: 2000,
+    material: 'white_card',
+    weight: 350,
+    printColor: 'four_color',
+    length: 16,
+    width: 10,
+    height: 5,
   }
-  const { missingFields, decision } = decideMainRoute('先给个参考价', mergedParams)
+  const { missingFields, decision } = decideMainRoute('开窗彩盒先给个参考价', mergedParams)
 
-  assert(missingFields.length === 1 && missingFields[0] === 'printSides', 'estimated 样例应仅缺 printSides')
+  assert(missingFields.length === 3, 'estimated 样例应缺少 3 个开窗字段')
+  assert(missingFields.includes('windowFilmThickness'), 'estimated 样例应缺 windowFilmThickness')
+  assert(missingFields.includes('windowSizeLength'), 'estimated 样例应缺 windowSizeLength')
+  assert(missingFields.includes('windowSizeWidth'), 'estimated 样例应缺 windowSizeWidth')
   assert(decision.status === 'estimated', '状态应为 estimated')
   assert(decision.reason === 'allowed_estimated_missing_set', 'reason 应为 allowed_estimated_missing_set')
+})
+
+test('handoff_required: 简单印刷品自动报价已停用时应转人工', () => {
+  const decision = decideQuotePath({
+    message: '我想印1000本A4画册',
+    productType: 'album',
+    missingFields: [],
+  })
+
+  assert(decision.status === 'handoff_required', '简单印刷品应转人工')
+  assert(decision.reason === 'simple_product_auto_quote_deactivated', 'reason 应为 simple_product_auto_quote_deactivated')
 })
 
 test('handoff_required: 文件型询价应优先转人工', () => {
@@ -101,19 +122,27 @@ test('handoff_required: 文件型询价应优先转人工', () => {
   assert(earlyDecision.reason === 'file_based_inquiry', 'reason 应为 file_based_inquiry')
 })
 
-test('missing_fields: 不在允许缺失集合应进入 missing_fields', () => {
+test('missing_fields: 支持的一期复杂包装缺少关键字段时应进入 missing_fields', () => {
   const mergedParams = {
-    productType: 'business_card',
-    finishedSize: '90x54mm',
-    paperType: 'coated',
-    paperWeight: 300,
-    printSides: 'double',
+    productType: 'box_insert',
+    quantity: 5000,
   }
-  const { missingFields, decision } = decideMainRoute('名片报价', mergedParams)
+  const { missingFields, decision } = decideMainRoute('再加一个内托', mergedParams)
 
-  assert(missingFields.length === 1 && missingFields[0] === 'quantity', 'missing_fields 样例应仅缺 quantity')
+  assert(missingFields.includes('insertMaterial'), 'missing_fields 样例应包含 insertMaterial')
   assert(decision.status === 'missing_fields', '状态应为 missing_fields')
   assert(decision.reason === 'required_fields_missing', 'reason 应为 required_fields_missing')
+})
+
+test('missing_fields: 产品类型未明确时不应 estimated 或 quoted', () => {
+  const decision = decideQuotePath({
+    message: '我想要个外包装推荐',
+    productType: undefined,
+    missingFields: ['productType'],
+  })
+
+  assert(decision.status === 'missing_fields', '产品类型未明确时应保持 missing_fields 或推荐咨询，不应直接报价')
+  assert(decision.reason === 'product_type_missing', 'reason 应为 product_type_missing')
 })
 
 console.log('\n=== 测试总结 ===\n')

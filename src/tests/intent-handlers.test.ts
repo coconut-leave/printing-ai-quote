@@ -55,13 +55,13 @@ test('PROGRESS_INQUIRY: MISSING_FIELDS 应提示缺参', () => {
 
 test('PROGRESS_INQUIRY: QUOTED 应提示已生成报价', () => {
   const result = buildProgressInquiryReply({ status: 'QUOTED', quotes: [{ id: 1 }], handoffs: [] })
-  assert(result.reply.includes('已生成报价'), '应提示已生成报价')
+  assert(result.reply.includes('报价结果'), '应提示已有报价结果')
   assert(result.reply.includes('报价单导出入口'), '应提示可导出报价单')
 })
 
 test('PROGRESS_INQUIRY: PENDING_HUMAN 应提示已转人工', () => {
   const result = buildProgressInquiryReply({ status: 'PENDING_HUMAN', quotes: [], handoffs: [{ id: 1, resolved: false }] })
-  assert(result.reply.includes('已转人工处理'), '应提示已转人工')
+  assert(result.reply.includes('人工同事'), '应提示人工继续跟进')
 })
 
 test('SAMPLE_REQUEST: 应返回标准样品咨询话术', () => {
@@ -73,7 +73,7 @@ test('SAMPLE_REQUEST: 应返回标准样品咨询话术', () => {
 test('BARGAIN_REQUEST: 已有报价时不应直接改正式报价', () => {
   const result = buildBargainRequestReply('这个价格能不能再便宜点', { status: 'QUOTED', quotes: [{ id: 1 }], handoffs: [] })
   assert(result.status === 'bargain_request', 'status 应为 bargain_request')
-  assert(result.reply.includes('不会直接修改'), '应明确不直接修改正式报价')
+  assert(result.reply.includes('不会直接改价'), '应明确不直接改正式报价')
 })
 
 test('BARGAIN_REQUEST: 带品类和预算倾向时应返回推荐方案', () => {
@@ -86,7 +86,7 @@ test('BARGAIN_REQUEST: 带品类和预算倾向时应返回推荐方案', () => 
 
 test('UNKNOWN: 应返回更自然的兜底回复', () => {
   const result = buildUnknownIntentReply()
-  assert(result.reply.includes('已收到您的消息'), '应包含更自然的开头')
+  assert(result.reply.includes('收到。'), '应包含更自然的开头')
 })
 
 console.log('\n=== 测试总结 ===\n')

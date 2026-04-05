@@ -1,9 +1,12 @@
 import {
+  COMPLEX_PACKAGING_PRODUCT_TYPES,
   FIELD_LABELS,
   FIELD_REPLY_EXAMPLES,
   getProductSchema,
+  isComplexPackagingProductType,
   normalizeProductType,
   ProductType,
+  SIMPLE_PRODUCT_TYPES,
 } from './productSchemas'
 
 export function getCatalogProductType(value?: string): ProductType {
@@ -78,6 +81,12 @@ function formatEnumValue(field: string, value: string): string {
       flyer: '传单',
       business_card: '名片',
       poster: '海报',
+      mailer_box: '飞机盒',
+      tuck_end_box: '双插盒',
+      window_box: '开窗彩盒',
+      leaflet_insert: '说明书',
+      box_insert: '内托',
+      seal_sticker: '封口贴',
     },
     coverPaper: {
       coated: '铜版纸',
@@ -96,6 +105,12 @@ function formatEnumValue(field: string, value: string): string {
       matte: '哑粉纸',
       art: '艺术纸',
       standard: '标准纸',
+      kraft: '牛皮纸',
+      white_card: '白卡纸',
+      single_coated: '单铜纸',
+      double_coated: '双铜纸',
+      specialty_board: '特种纸板',
+      clear_sticker: '透明贴纸',
     },
     bindingType: {
       saddle_stitch: '骑马钉',
@@ -118,6 +133,36 @@ function formatEnumValue(field: string, value: string): string {
       glossy: '光膜',
       matte: '哑膜',
     },
+    printColor: {
+      black: '印黑色',
+      four_color: '四色',
+      double_four_color: '正反四色',
+      double_four_color_print: '双面四色印',
+      four_color_spot: '四色 + 专色',
+      spot: '专色',
+    },
+    surfaceFinish: {
+      none: '无表面处理',
+      matte_lamination: '过哑胶',
+      glossy_lamination: '过光胶',
+      uv: 'UV',
+    },
+    laminationType: {
+      none: '无过胶',
+      matte: '哑胶',
+      glossy: '光胶',
+    },
+    foldType: {
+      tri_fold: '三折',
+      bi_fold: '二折',
+      z_fold: 'Z 折',
+      none: '不折',
+    },
+    referenceFileCategory: {
+      knowledge_reference: '知识参考 PDF',
+      design_file: '设计文件样例',
+      dieline_pdf: '刀模 PDF 样例',
+    },
   }
 
   return valueMap[field]?.[value] || value
@@ -132,7 +177,27 @@ export function formatParamValue(field: string, value: unknown): string {
     return formatEnumValue(field, value)
   }
 
+  if (typeof value === 'boolean') {
+    return value ? '是' : '否'
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => formatParamValue(field, item)).join('、')
+  }
+
   return String(value)
+}
+
+export function getAllSupportedProductTypes(): ProductType[] {
+  return [...SIMPLE_PRODUCT_TYPES, ...COMPLEX_PACKAGING_PRODUCT_TYPES]
+}
+
+export function isSimpleProductType(value?: string): value is ProductType {
+  return SIMPLE_PRODUCT_TYPES.includes(value as ProductType)
+}
+
+export function isPackagingProductType(value?: string): value is ProductType {
+  return isComplexPackagingProductType(value)
 }
 
 export function getDisplayParamEntries(productType: string | undefined, params: Record<string, any>): Array<{ field: string; label: string; value: string }> {

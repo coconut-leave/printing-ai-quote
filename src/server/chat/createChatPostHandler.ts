@@ -5,6 +5,7 @@ import { calculateAlbumQuote } from '@/server/pricing/albumQuote'
 import { calculateFlyerQuote } from '@/server/pricing/flyerQuote'
 import { calculateBusinessCardQuote } from '@/server/pricing/businessCardQuote'
 import { calculatePosterQuote } from '@/server/pricing/posterQuote'
+import { calculateBundleQuote } from '@/server/pricing/complexPackagingQuote'
 import {
   createConversation,
   getConversationById,
@@ -26,7 +27,8 @@ import {
   getRequiredFields,
   isEstimatedAllowed,
 } from '@/lib/catalog/helpers'
-import { detectIntent, extractExplicitProductType, getIntentPlaceholderReply, looksLikeFreshQuoteRequest, type DetectIntentResult } from '@/server/intent/detectIntent'
+import { detectIntent, extractExplicitProductType, getIntentPlaceholderReply, looksLikeFreshQuoteRequest, type ChatIntent, type DetectIntentResult } from '@/server/intent/detectIntent'
+import { assessAnswerability, buildStableHandoffReply } from '@/server/intent/answerability'
 import { applyRecommendedPatch } from '@/server/intent/applyRecommendedPatch'
 import { buildRecommendationRerequestMessage } from '@/server/intent/applyRecommendedPatch'
 import { handleLightweightBusinessIntent } from '@/server/intent/handleIntent'
@@ -34,6 +36,14 @@ import { handleConsultationIntent } from '@/server/intent/handleConsultation'
 import { buildRecommendationBaseParams, getLatestRecommendedParams } from '@/server/intent/recommendationContext'
 import { canPatchRecommendation, isImmediateHandoffIntent, isNonQuoteFlowIntent } from '@/server/catalog/flowBoundaries'
 import { decideQuotePath } from '@/server/quote/workflowPolicy'
+import {
+  decideComplexPackagingQuotePath,
+  formatComplexPackagingMissingReply,
+  getLatestComplexPackagingState,
+  resolveComplexPackagingConversationTurn,
+} from '@/server/packaging/extractComplexPackagingQuote'
+import { buildComplexPackagingSecondPhaseShadow } from '@/server/packaging/complexPackagingSecondPhaseShadow'
+import { buildPackagingReviewSummary } from '@/lib/packaging/reviewSummary'
 import { answerKnowledgeQuestion } from '@/server/rag/answerKnowledgeQuestion'
 import { getRequestTraceId, logRouterDispatch } from '@/server/logging/routerRagTrace'
 
@@ -167,16 +177,16 @@ function buildDirectReplyGuide(missingFields: string[]): string {
     .slice(0, 3)
 
   if (samples.length === 0) {
-    return '请直接回复缺失参数，例如：页数 32 页。'
+    return '您可以直接回复缺的参数，例如：页数 32 页。'
   }
 
-  return `可直接回复：${samples.join('，')}。`
+  return `您可以直接这样回我：${samples.join('，')}。`
 }
 
 function generateMissingFieldsReply(missingFields: string[]): string {
   const missingLabels = getMissingFieldsChineseText(undefined, missingFields)
   const guideText = buildDirectReplyGuide(missingFields)
-  return `当前信息还不足以生成报价。还缺少：${missingLabels}。${guideText}补齐后可为您生成更准确报价。`
+  return `这边先帮您看了一下，按现在的信息还没法直接算价，还差：${missingLabels}。${guideText}补齐后我就可以继续给您算；如果有些参数暂时没定，也可以先告诉我用途或预算，我先按常见做法帮您估一版。`
 }
 
 function generateMissingFieldsReplyByProduct(productType: string | undefined, missingFields: string[]): string {
@@ -191,7 +201,7 @@ function generateMissingFieldsReplyByProduct(productType: string | undefined, mi
 function generateQuoteReply(result: any, productType?: string): string {
   const qty = result.normalizedParams?.quantity ?? result.quantity ?? 0
   const unit = getProductUnit(productType)
-  return `已为您生成正式报价：单价 ¥${result.unitPrice}/${unit}，${qty}${unit}共 ¥${result.totalPrice}，加上运费 ¥${result.shippingFee}、税费 ¥${result.tax}，最终价格 ¥${result.finalPrice}。`
+  return `这边先按您这版参数算好了：单价 ¥${result.unitPrice}/${unit}，${qty}${unit}共 ¥${result.totalPrice}；运费 ¥${result.shippingFee}，税费 ¥${result.tax}，合计 ¥${result.finalPrice}。如果数量、材质或工艺还想微调，您直接接着说，我可以继续帮您重算。`
 }
 
 function generateEstimatedReply(
@@ -205,15 +215,71 @@ function generateEstimatedReply(
   const qty = result.normalizedParams?.quantity ?? result.quantity ?? 0
   const assumptionsText = assumptions.length > 0 ? `（按${assumptions.join('、')}）` : ''
   const missingLabels = getMissingFieldsChineseText(undefined, missingFields)
-  const missingHintText = missingHint ? `当前缺少${missingLabels}，已按${missingHint}估算。` : `当前缺少${missingLabels}，已按常见值估算。`
+  const missingHintText = missingHint ? `目前还差${missingLabels}，这版先按${missingHint}帮您估的。` : `目前还差${missingLabels}，这版先按常见做法帮您估的。`
   const alternativeText = alternatives
-    ? ` 参考：${Object.entries(alternatives)
+    ? ` 另外我顺手给您放了几个对比：${Object.entries(alternatives)
       .map(([name, v]) => `${name} ¥${(v as any).finalPrice}`)
       .join('；')}。`
     : ''
   const schema = getProductSchema(productType)
   const estimatedHint = schema.statusHints?.estimated ? ` ${schema.statusHints.estimated}` : ''
-  return `已为您生成参考报价${assumptionsText}：单价 ¥${result.unitPrice}，数量 ${qty}，预估总价 ¥${result.finalPrice}。${missingHintText}${alternativeText}${estimatedHint}补齐后可生成更准确报价，最终价格以补齐参数或人工复核为准。`
+  return `按您现在给到的信息，这边先给您一个参考价${assumptionsText}：单价约 ¥${result.unitPrice}，数量 ${qty}，预估总价约 ¥${result.finalPrice}。${missingHintText}${alternativeText}${estimatedHint}您把缺的参数补给我后，我再帮您收成更准的一版。`
+}
+
+function generateComplexPackagingQuoteReply(result: any): string {
+  const isBundle = Boolean(result?.isBundle)
+  const reviewHint = result?.requiresHumanReview ? ' 这类结构我还是建议您再结合人工复核确认一下，会更稳。' : ''
+
+  if (isBundle) {
+    return `这边先按您这版一期复杂包装方案核了一下：组合单套价 ¥${result.totalUnitPrice}，合计 ¥${result.finalPrice}。主件和配套件明细我已经一起拆出来了。${reviewHint}`
+  }
+
+  return `这边先按您这版复杂包装参数核了一下：单价 ¥${result.unitPrice}，合计 ¥${result.finalPrice}。${reviewHint}`
+}
+
+function generateComplexPackagingEstimatedReply(result: any): string {
+  const isBundle = Boolean(result?.isBundle)
+  if (isBundle) {
+    return `按您现在这版一期复杂包装信息，我先给您一个组合预估：组合单套价约 ¥${result.totalUnitPrice}，预估合计约 ¥${result.finalPrice}。这类组合件我还是建议您再结合人工复核确认一下。`
+  }
+
+  return `按您现在这版一期复杂包装信息，我先给您一个预估：参考单价约 ¥${result.unitPrice}，预估合计约 ¥${result.finalPrice}。后面如果尺寸、材质或工艺还有调整，我可以继续帮您往下收。`
+}
+
+function buildComplexPackagingActionLead(action?: string | null, targetItemTitle?: string): string {
+  switch (action) {
+    case 'supplement_params':
+      return '这边先把您刚补的参数并进系统重算了一版。'
+    case 'modify_existing_item':
+      return targetItemTitle
+        ? `这边已经按您刚调整的${targetItemTitle}重算了一版。`
+        : '这边已经按您刚调整的参数重算了一版。'
+    case 'add_sub_item':
+      return targetItemTitle
+        ? `这边已经把${targetItemTitle}并进当前组合，按最新结构重算了一版。`
+        : '这边已经把新增子项并进当前组合，按最新结构重算了一版。'
+    case 'remove_sub_item':
+      return targetItemTitle
+        ? `这边已经把${targetItemTitle}从当前组合里去掉，并按最新结构重算了一版。`
+        : '这边已经把对应子项从当前组合里去掉，并按最新结构重算了一版。'
+    default:
+      return ''
+  }
+}
+
+function prependActionLead(reply: string, action?: string | null, targetItemTitle?: string): string {
+  const lead = buildComplexPackagingActionLead(action, targetItemTitle)
+  return lead ? `${lead}${reply}` : reply
+}
+
+function generateComplexPackagingHandoffReply(referenceFileCategory?: string): string {
+  const fileHint = referenceFileCategory === 'dieline_pdf'
+    ? '这次还带了刀模 PDF 参考信息。'
+    : referenceFileCategory === 'design_file'
+    ? '这次还带了设计文件参考信息。'
+    : ''
+
+  return `${fileHint}这类情况我先转给人工同事复核会更稳一些。您也可以继续把尺寸、材质、印色、数量和工艺补在当前会话里，人工会接着看。`
 }
 
 function matchMissing(missingFields: string[], expected: string[]): boolean {
@@ -479,22 +545,102 @@ function checkMissingFields(params: Record<string, any>): string[] {
   })
 }
 
-function generateHandoffReply(): string {
-  return '您的询价涉及设计文件或专业审稿需求，已为您转接专业人工服务团队进行核价。请稍候，我们的专业人员将尽快联系您。'
+function generateHandoffReply(reason: 'out_of_scope_or_complex' | 'insufficient_safe_context' | 'unsupported_or_unstable_answer' = 'unsupported_or_unstable_answer'): string {
+  return buildStableHandoffReply(reason)
+}
+
+function generateSimpleProductDeactivatedReply(productType?: string): string {
+  const productLabel = getProductSchema(productType).nameZh
+  return `这边先跟您说明一下，目前自动报价主要支持一期复杂包装，${productLabel} 这类先走人工核价会更稳。您如果方便，可以继续把数量、尺寸、纸张和工艺发我，我帮您整理给人工；如果您要做飞机盒、双插盒、开窗彩盒、说明书、内托或封口贴，也可以直接在这里继续自动预报价。`
 }
 
 function generateComplaintHandoffReply(): string {
-  return '已识别为投诉或异常反馈，当前为保证处理质量，已为您转接人工团队继续跟进。'
+  return '这个问题我先帮您转给人工同事优先跟进，避免耽误处理。您也可以把具体情况、订单信息或截图继续发在当前会话里。'
 }
 
-function generateRecommendationUpdatedReply(patchSummary?: string): string {
-  const summaryText = patchSummary ? `已按您的要求更新当前推荐方案：${patchSummary}。` : '当前推荐方案已更新。'
-  return `${summaryText} 如需报价，可直接说“按这个方案报价”或“现在算一下”。`
+function isReusableComplexPackagingContextAction(action?: string | null): boolean {
+  return action === 'supplement_params'
+    || action === 'modify_existing_item'
+    || action === 'add_sub_item'
+    || action === 'remove_sub_item'
+    || action === 'view_existing_quote'
 }
 
-function generateRerecommendedReply(reply: string): string {
-  const normalized = reply.replace('如果您需要，我也可以按这个方案给您估个价。', '').trim()
-  return `已为您调整推荐方案。${normalized} 如果您认可，可直接说“按这个方案报价”或“现在算一下”。`
+function looksLikeAbnormalNoiseInput(message: string): boolean {
+  const text = message.trim()
+  if (!text) {
+    return true
+  }
+
+  if (/^[^\p{Script=Han}a-zA-Z0-9]+$/u.test(text)) {
+    return true
+  }
+
+  if (/^[a-z0-9_~`!@#$%^&*()+=[\]{}\\|;:'",.<>/?\-]{6,}$/i.test(text) && !/\s/.test(text)) {
+    return true
+  }
+
+  const hanCount = (text.match(/[\p{Script=Han}]/gu) || []).length
+  const digitCount = (text.match(/[0-9]/g) || []).length
+  const letterCount = (text.match(/[a-z]/gi) || []).length
+
+  return hanCount === 0 && digitCount === 0 && letterCount >= 6
+}
+
+function buildComplexPackagingClarificationReply(message: string): string {
+  if (looksLikeAbnormalNoiseInput(message)) {
+    return '抱歉，我这边暂时没法稳定识别您这条需求。为避免给您错误结果，您可以再明确一下，或者我直接帮您转人工。'
+  }
+
+  if (message.trim().length <= 12) {
+    return '抱歉，我这边没法确认您这条是在补充当前报价信息。您可以直接告诉我想改哪一项，或者我帮您转人工处理。'
+  }
+
+  return '抱歉，这条内容我暂时没法和当前报价对应上。您可以再说一下是想改参数、加配件、删子项，还是查看当前结果。'
+}
+
+function shouldClarifyComplexPackagingFollowUp(params: {
+  message: string
+  intent: ChatIntent
+  hasPreviousPackagingState: boolean
+  complexPackagingRequest: boolean
+  complexPackagingAction?: string | null
+  messageProductType?: string
+}): boolean {
+  if (!params.hasPreviousPackagingState || params.complexPackagingRequest || isReusableComplexPackagingContextAction(params.complexPackagingAction)) {
+    return false
+  }
+
+  if (params.messageProductType || looksLikeFreshQuoteRequest(params.message)) {
+    return false
+  }
+
+  return params.intent === 'UNKNOWN'
+    || params.intent === 'PARAM_SUPPLEMENT'
+    || params.intent === 'QUOTE_REQUEST'
+}
+
+function generateRecommendationUpdatedReply(patchSummary?: string, productType?: string): string {
+  const summaryText = patchSummary ? `好的，这版我已经按您的意思改成：${patchSummary}。` : '好的，这版方案我已经帮您更新了。'
+  if (productType && ['mailer_box', 'tuck_end_box', 'window_box', 'leaflet_insert', 'box_insert', 'seal_sticker'].includes(productType)) {
+    return `${summaryText} 如果这版可以，您继续把还没定的尺寸、材质、印色、数量或工艺发我，我就按这条线往下算。`
+  }
+
+  return `${summaryText} 如果这版方向合适，您可以直接说“按这个方案报价”，或者把数量、尺寸这些细节继续补给我。`
+}
+
+function generateRerecommendedReply(reply: string, productType?: string): string {
+  const normalized = reply
+    .replace('如果您需要，我也可以按这个方案给您估个价。', '')
+    .replace('如果这版方向合适，您可以直接说“按这个方案报价”，或者把数量、尺寸等细节补给我，我继续往下收。', '')
+    .replace('如果这个方向对了，直接把尺寸、材质、印色、数量和工艺发我，我就按这条线继续预估。', '')
+    .trim()
+
+  if (productType && ['mailer_box', 'tuck_end_box', 'window_box', 'leaflet_insert', 'box_insert', 'seal_sticker'].includes(productType)) {
+    return `可以，这边给您换一版更贴近需求的方向。${normalized} 如果这版更合适，您继续把尺寸、材质、印色、数量和工艺发我，我就接着往下估。`
+  }
+
+  return `可以，这边给您换一版更贴近需求的方向。${normalized} 如果这版更合适，您可以直接说“按这个方案报价”，或者把还没定的参数继续发我。`
 }
 
 type ChatRouteDeps = {
@@ -589,6 +735,7 @@ export function createChatPostHandler(
       const resetQuoteContext = shouldResetQuoteContext(payload.message, messageProductType, activeContextProductType)
       const activeHistoricalParams = resetQuoteContext ? null : historicalParams
       const activeRecommendedParams = resetQuoteContext ? null : latestRecommendedParams
+      const existingPackagingState = getLatestComplexPackagingState(conversationDetails)
 
       const agentRoute = await resolvedDeps.routeMessage({
         message: payload.message,
@@ -627,6 +774,54 @@ export function createChatPostHandler(
         const recommendedParams = consultationResult?.recommendedParams || lightweightBusinessResult?.recommendedParams
         const responseStatus = consultationResult?.status || lightweightBusinessResult?.status || 'knowledge_reply'
         const responseIntent = consultationResult?.consultationIntent || knowledgeIntentResult.intent || 'KNOWLEDGE_QA'
+        const answerabilityDecision = assessAnswerability({
+          message: payload.message,
+          intent: responseIntent,
+          consultationResolved: Boolean(consultationResult || lightweightBusinessResult),
+          hasContextProductType: Boolean(activeContextProductType),
+          hasComplexPackagingState: Boolean(existingPackagingState),
+          insufficientKnowledge: knowledgeAnswer.insufficientKnowledge,
+        })
+
+        if (answerabilityDecision.shouldHandoff) {
+          const reply = answerabilityDecision.reply || generateHandoffReply('unsupported_or_unstable_answer')
+
+          logRouterDispatch({
+            conversationId,
+            requestId,
+            message: payload.message,
+            routerIntent: agentRoute.intent,
+            finalIntent: responseIntent,
+            branch: 'rag_consultation_handoff',
+            responseStatus: 'handoff_required',
+            usedRag: true,
+            executedQuoteEngine: false,
+            executedHandoff: true,
+            note: answerabilityDecision.reason,
+          })
+
+          await updateConversationStatus(conversationId, 'PENDING_HUMAN')
+          await createHandoffRecord(conversationId, `answerability:${answerabilityDecision.reason}`, 'sales_team')
+          await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+            intent: responseIntent,
+            intentReason: knowledgeIntentResult.reason,
+            responseStatus: 'handoff_required',
+            answerabilityReason: answerabilityDecision.reason,
+            fallbackMode: 'fallback_to_human',
+          })
+
+          return respond({
+            ok: true,
+            status: 'handoff_required',
+            intent: responseIntent,
+            intentReason: knowledgeIntentResult.reason,
+            conversationId,
+            reply,
+            answerabilityReason: answerabilityDecision.reason,
+            fallbackMode: 'fallback_to_human',
+          })
+        }
+
         const reply = consultationResult?.reply || lightweightBusinessResult?.reply || knowledgeAnswer.reply
 
         logRouterDispatch({
@@ -658,6 +853,8 @@ export function createChatPostHandler(
           consultationCategory: consultationResult?.consultationCategory,
           hasRecommendedParams: consultationResult?.hasRecommendedParams,
           productType: consultationResult?.productType || recommendedParams?.productType,
+          candidateProductTypes: consultationResult?.candidateProductTypes,
+          conversationAction: lightweightBusinessResult?.conversationAction,
           ragFallbackUsed: knowledgeAnswer.fallbackUsed,
           ragFallbackReason: knowledgeAnswer.fallbackReason,
           ragAnswerType: knowledgeAnswer.answerType,
@@ -687,6 +884,8 @@ export function createChatPostHandler(
           consultationCategory: consultationResult?.consultationCategory,
           hasRecommendedParams: consultationResult?.hasRecommendedParams,
           productType: consultationResult?.productType || recommendedParams?.productType,
+          candidateProductTypes: consultationResult?.candidateProductTypes,
+          conversationAction: lightweightBusinessResult?.conversationAction,
           ragFallbackUsed: knowledgeAnswer.fallbackUsed,
           ragFallbackReason: knowledgeAnswer.fallbackReason,
           ragAnswerType: knowledgeAnswer.answerType,
@@ -796,6 +995,7 @@ export function createChatPostHandler(
           intent: intentResult.intent,
           intentReason: intentResult.reason,
           responseStatus,
+          conversationAction: progressResult?.conversationAction,
         })
 
         return respond({
@@ -805,22 +1005,36 @@ export function createChatPostHandler(
           intentReason: intentResult.reason,
           conversationId,
           reply,
+          conversationAction: progressResult?.conversationAction,
         })
       }
 
-      const recommendationRerequest = activeRecommendedParams
-        ? buildRecommendationRerequestMessage(activeRecommendedParams, payload.message)
+      const previousPackagingState = existingPackagingState
+      const complexPackagingTurn = resolveComplexPackagingConversationTurn(payload.message, previousPackagingState)
+      const complexPackagingRequest = complexPackagingTurn.request
+      const hasReusablePackagingContext = Boolean(
+        previousPackagingState && isReusableComplexPackagingContextAction(complexPackagingTurn.action)
+      )
+      const shouldBlockHistoricalQuoteReuse = Boolean(
+        previousPackagingState && !complexPackagingRequest && !hasReusablePackagingContext
+      )
+      const scopedHistoricalParams = shouldBlockHistoricalQuoteReuse ? null : activeHistoricalParams
+      const scopedRecommendedParams = shouldBlockHistoricalQuoteReuse ? null : activeRecommendedParams
+      const scopedContextProductType = shouldBlockHistoricalQuoteReuse ? undefined : activeContextProductType
+
+      const recommendationRerequest = scopedRecommendedParams
+        ? buildRecommendationRerequestMessage(scopedRecommendedParams, payload.message)
         : null
 
       if (
-        activeRecommendedParams &&
+        scopedRecommendedParams &&
         recommendationRerequest &&
         (intentResult.intent === 'SOLUTION_RECOMMENDATION' || intentResult.intent === 'BARGAIN_REQUEST')
       ) {
         const rerecommended = handleConsultationIntent('SOLUTION_RECOMMENDATION', recommendationRerequest.query)
 
         if (rerecommended?.recommendedParams) {
-          const reply = generateRerecommendedReply(rerecommended.reply)
+          const reply = generateRerecommendedReply(rerecommended.reply, rerecommended.recommendedParams.productType)
 
           logRouterDispatch({
             conversationId,
@@ -856,9 +1070,104 @@ export function createChatPostHandler(
         }
       }
 
-      if (isNonQuoteFlowIntent(intentResult.intent)) {
+      if (shouldClarifyComplexPackagingFollowUp({
+        message: payload.message,
+        intent: intentResult.intent,
+        hasPreviousPackagingState: Boolean(previousPackagingState),
+        complexPackagingRequest: Boolean(complexPackagingRequest),
+        complexPackagingAction: complexPackagingTurn.action,
+        messageProductType,
+      })) {
+        const reply = buildComplexPackagingClarificationReply(payload.message)
+
+        logRouterDispatch({
+          conversationId,
+          requestId,
+          message: payload.message,
+          routerIntent: agentRoute.intent,
+          finalIntent: intentResult.intent,
+          branch: 'complex_packaging_context_clarification',
+          responseStatus: 'intent_only',
+          usedRag: false,
+          executedHandoff: false,
+          executedQuoteEngine: false,
+          note: 'blocked_unstable_complex_packaging_context_reuse',
+        })
+
+        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+          intent: intentResult.intent,
+          intentReason: intentResult.reason,
+          responseStatus: 'intent_only',
+          clarificationReason: 'complex_packaging_context_not_stably_matched',
+          fallbackMode: 'clarify_current_quote_relation',
+          blockedContextReuse: true,
+          complexPackagingState: previousPackagingState,
+        })
+
+        return respond({
+          ok: true,
+          status: 'intent_only',
+          intent: intentResult.intent,
+          intentReason: intentResult.reason,
+          conversationId,
+          reply,
+          clarificationReason: 'complex_packaging_context_not_stably_matched',
+          fallbackMode: 'clarify_current_quote_relation',
+          blockedContextReuse: true,
+          complexPackagingState: previousPackagingState,
+        })
+      }
+
+      if (isNonQuoteFlowIntent(intentResult.intent) && intentResult.intent !== 'UNKNOWN') {
         const consultationResult = handleConsultationIntent(intentResult.intent, payload.message)
         const lightweightBusinessResult = handleLightweightBusinessIntent(intentResult.intent, conversationDetails, payload.message)
+        const answerabilityDecision = assessAnswerability({
+          message: payload.message,
+          intent: intentResult.intent,
+          consultationResolved: Boolean(consultationResult || lightweightBusinessResult),
+          hasContextProductType: Boolean(scopedContextProductType),
+          hasComplexPackagingState: hasReusablePackagingContext,
+        })
+
+        if (answerabilityDecision.shouldHandoff) {
+          const reply = answerabilityDecision.reply || generateHandoffReply('unsupported_or_unstable_answer')
+
+          logRouterDispatch({
+            conversationId,
+            requestId,
+            message: payload.message,
+            routerIntent: agentRoute.intent,
+            finalIntent: intentResult.intent,
+            branch: 'non_quote_fallback_handoff',
+            responseStatus: 'handoff_required',
+            usedRag: false,
+            executedHandoff: true,
+            executedQuoteEngine: false,
+            note: answerabilityDecision.reason,
+          })
+
+          await updateConversationStatus(conversationId, 'PENDING_HUMAN')
+          await createHandoffRecord(conversationId, `answerability:${answerabilityDecision.reason}`, 'sales_team')
+          await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+            intent: intentResult.intent,
+            intentReason: intentResult.reason,
+            responseStatus: 'handoff_required',
+            answerabilityReason: answerabilityDecision.reason,
+            fallbackMode: 'fallback_to_human',
+          })
+
+          return respond({
+            ok: true,
+            status: 'handoff_required',
+            intent: intentResult.intent,
+            intentReason: intentResult.reason,
+            conversationId,
+            reply,
+            answerabilityReason: answerabilityDecision.reason,
+            fallbackMode: 'fallback_to_human',
+          })
+        }
+
         const reply = consultationResult?.reply || lightweightBusinessResult?.reply || getIntentPlaceholderReply(intentResult.intent)
         const responseStatus = consultationResult?.status || lightweightBusinessResult?.status || 'intent_only'
         const recommendedParams = consultationResult?.recommendedParams || lightweightBusinessResult?.recommendedParams
@@ -887,6 +1196,8 @@ export function createChatPostHandler(
           consultationCategory: consultationResult?.consultationCategory,
           hasRecommendedParams: consultationResult?.hasRecommendedParams,
           productType: consultationResult?.productType || recommendedParams?.productType,
+          candidateProductTypes: consultationResult?.candidateProductTypes,
+          conversationAction: lightweightBusinessResult?.conversationAction,
         })
 
         return respond({
@@ -903,6 +1214,356 @@ export function createChatPostHandler(
           consultationCategory: consultationResult?.consultationCategory,
           hasRecommendedParams: consultationResult?.hasRecommendedParams,
           productType: consultationResult?.productType || recommendedParams?.productType,
+          candidateProductTypes: consultationResult?.candidateProductTypes,
+          conversationAction: lightweightBusinessResult?.conversationAction,
+        })
+      }
+
+      const answerabilityDecision = assessAnswerability({
+        message: payload.message,
+        intent: intentResult.intent,
+        hasContextProductType: Boolean(scopedContextProductType),
+        hasComplexPackagingState: hasReusablePackagingContext,
+        hasComplexPackagingRequest: Boolean(complexPackagingRequest),
+      })
+
+      if (answerabilityDecision.shouldHandoff) {
+        const reply = answerabilityDecision.reply || generateHandoffReply('unsupported_or_unstable_answer')
+
+        logRouterDispatch({
+          conversationId,
+          requestId,
+          message: payload.message,
+          routerIntent: agentRoute.intent,
+          finalIntent: intentResult.intent,
+          branch: 'answerability_fallback_handoff',
+          responseStatus: 'handoff_required',
+          usedRag: false,
+          executedHandoff: true,
+          executedQuoteEngine: false,
+          note: answerabilityDecision.reason,
+        })
+
+        await updateConversationStatus(conversationId, 'PENDING_HUMAN')
+        await createHandoffRecord(conversationId, `answerability:${answerabilityDecision.reason}`, 'sales_team')
+        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+          intent: intentResult.intent,
+          intentReason: intentResult.reason,
+          responseStatus: 'handoff_required',
+          answerabilityReason: answerabilityDecision.reason,
+          fallbackMode: 'fallback_to_human',
+        })
+
+        return respond({
+          ok: true,
+          status: 'handoff_required',
+          intent: intentResult.intent,
+          intentReason: intentResult.reason,
+          conversationId,
+          reply,
+          answerabilityReason: answerabilityDecision.reason,
+          fallbackMode: 'fallback_to_human',
+        })
+      }
+
+      if (complexPackagingRequest) {
+        const decision = decideComplexPackagingQuotePath(complexPackagingRequest)
+        const quoteResult = calculateBundleQuote(complexPackagingRequest)
+        const complexPackagingShadow = buildComplexPackagingSecondPhaseShadow({
+          message: payload.message,
+          phaseOneProductType: complexPackagingRequest.mainItem.productType,
+          phaseOneStatus: decision.status,
+        })
+        timing.mark('complex_packaging_decided')
+
+        if (decision.status === 'handoff_required') {
+          const packagingReview = buildPackagingReviewSummary({
+            status: 'handoff_required',
+            decision,
+            request: complexPackagingRequest,
+            referenceFiles: complexPackagingRequest.referenceFiles,
+            requiresHumanReview: true,
+          })
+          const reply = prependActionLead(
+            generateComplexPackagingHandoffReply(complexPackagingRequest.referenceFileCategory),
+            complexPackagingTurn.action,
+            complexPackagingTurn.targetItemTitle,
+          )
+
+          logRouterDispatch({
+            conversationId,
+            requestId,
+            message: payload.message,
+            routerIntent: agentRoute.intent,
+            finalIntent: intentResult.intent,
+            branch: 'complex_packaging_handoff',
+            responseStatus: 'handoff_required',
+            usedRag: false,
+            executedHandoff: true,
+            executedQuoteEngine: false,
+          })
+
+          await updateConversationStatus(conversationId, 'PENDING_HUMAN')
+          await createHandoffRecord(conversationId, '复杂包装文件参考或缺参，需人工复核', 'sales_team')
+          await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+            intent: intentResult.intent,
+            intentReason: intentResult.reason,
+            responseStatus: 'handoff_required',
+            complexPackagingDecision: decision,
+            complexPackagingRequest,
+            complexPackagingState: complexPackagingRequest,
+            complexPackagingShadow,
+            packagingReview,
+            referenceFiles: complexPackagingRequest.referenceFiles,
+            requiresHumanReview: true,
+            conversationAction: complexPackagingTurn.action,
+            conversationActionTargetItemType: complexPackagingTurn.targetItemType,
+            conversationActionTargetItemTitle: complexPackagingTurn.targetItemTitle,
+          })
+
+          return respond({
+            ok: true,
+            status: 'handoff_required',
+            intent: intentResult.intent,
+            intentReason: intentResult.reason,
+            conversationId,
+            reply,
+            missingFields: decision.missingFields,
+            missingDetails: decision.missingDetails,
+            complexPackagingState: complexPackagingRequest,
+            packagingReview,
+            referenceFiles: complexPackagingRequest.referenceFiles,
+            requiresHumanReview: true,
+            conversationAction: complexPackagingTurn.action,
+            conversationActionTargetItemType: complexPackagingTurn.targetItemType,
+            conversationActionTargetItemTitle: complexPackagingTurn.targetItemTitle,
+          })
+        }
+
+        if (decision.status === 'missing_fields') {
+          const packagingReview = buildPackagingReviewSummary({
+            status: 'missing_fields',
+            decision,
+            request: complexPackagingRequest,
+            referenceFiles: complexPackagingRequest.referenceFiles,
+            requiresHumanReview: complexPackagingRequest.requiresHumanReview,
+          })
+          const reply = prependActionLead(
+            formatComplexPackagingMissingReply(decision.missingDetails),
+            complexPackagingTurn.action,
+            complexPackagingTurn.targetItemTitle,
+          )
+
+          logRouterDispatch({
+            conversationId,
+            requestId,
+            message: payload.message,
+            routerIntent: agentRoute.intent,
+            finalIntent: intentResult.intent,
+            branch: 'complex_packaging_missing_fields',
+            responseStatus: 'missing_fields',
+            usedRag: false,
+            executedHandoff: false,
+            executedQuoteEngine: false,
+          })
+
+          await updateConversationStatus(conversationId, 'MISSING_FIELDS')
+          await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+            intent: intentResult.intent,
+            intentReason: intentResult.reason,
+            responseStatus: 'missing_fields',
+            complexPackagingDecision: decision,
+            complexPackagingRequest,
+            complexPackagingState: complexPackagingRequest,
+            complexPackagingShadow,
+            packagingReview,
+            referenceFiles: complexPackagingRequest.referenceFiles,
+            requiresHumanReview: complexPackagingRequest.requiresHumanReview,
+            conversationAction: complexPackagingTurn.action,
+            conversationActionTargetItemType: complexPackagingTurn.targetItemType,
+            conversationActionTargetItemTitle: complexPackagingTurn.targetItemTitle,
+          })
+
+          return respond({
+            ok: true,
+            status: 'missing_fields',
+            intent: intentResult.intent,
+            intentReason: intentResult.reason,
+            conversationId,
+            reply,
+            missingFields: decision.missingFields,
+            missingDetails: decision.missingDetails,
+            mergedParams: quoteResult.normalizedParams,
+            complexPackagingState: complexPackagingRequest,
+            packagingReview,
+            referenceFiles: complexPackagingRequest.referenceFiles,
+            requiresHumanReview: complexPackagingRequest.requiresHumanReview,
+            conversationAction: complexPackagingTurn.action,
+            conversationActionTargetItemType: complexPackagingTurn.targetItemType,
+            conversationActionTargetItemTitle: complexPackagingTurn.targetItemTitle,
+          })
+        }
+
+        if (decision.status === 'estimated') {
+          const packagingReview = buildPackagingReviewSummary({
+            status: 'estimated',
+            decision,
+            request: complexPackagingRequest,
+            quoteResult,
+            referenceFiles: complexPackagingRequest.referenceFiles,
+            requiresHumanReview: true,
+          })
+          const reply = prependActionLead(
+            generateComplexPackagingEstimatedReply(quoteResult),
+            complexPackagingTurn.action,
+            complexPackagingTurn.targetItemTitle,
+          )
+
+          logRouterDispatch({
+            conversationId,
+            requestId,
+            message: payload.message,
+            routerIntent: agentRoute.intent,
+            finalIntent: intentResult.intent,
+            branch: 'complex_packaging_estimated',
+            responseStatus: 'estimated',
+            usedRag: false,
+            executedHandoff: false,
+            executedQuoteEngine: true,
+          })
+
+          await updateConversationStatus(conversationId, 'MISSING_FIELDS')
+          await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+            intent: intentResult.intent,
+            intentReason: intentResult.reason,
+            responseStatus: 'estimated',
+            complexPackagingDecision: decision,
+            complexPackagingRequest,
+            complexPackagingState: complexPackagingRequest,
+            complexPackagingShadow,
+            estimatedData: quoteResult,
+            packagingReview,
+            referenceFiles: complexPackagingRequest.referenceFiles,
+            requiresHumanReview: true,
+            conversationAction: complexPackagingTurn.action,
+            conversationActionTargetItemType: complexPackagingTurn.targetItemType,
+            conversationActionTargetItemTitle: complexPackagingTurn.targetItemTitle,
+          })
+
+          return respond({
+            ok: true,
+            status: 'estimated',
+            intent: intentResult.intent,
+            intentReason: intentResult.reason,
+            conversationId,
+            reply,
+            estimatedData: quoteResult,
+            missingFields: decision.missingFields,
+            missingDetails: decision.missingDetails,
+            complexPackagingState: complexPackagingRequest,
+            packagingReview,
+            referenceFiles: complexPackagingRequest.referenceFiles,
+            requiresHumanReview: true,
+            conversationAction: complexPackagingTurn.action,
+            conversationActionTargetItemType: complexPackagingTurn.targetItemType,
+            conversationActionTargetItemTitle: complexPackagingTurn.targetItemTitle,
+          })
+        }
+
+        const packagingReview = buildPackagingReviewSummary({
+          status: 'quoted',
+          decision,
+          request: complexPackagingRequest,
+          quoteResult,
+          referenceFiles: quoteResult.referenceFiles,
+          requiresHumanReview: quoteResult.requiresHumanReview,
+        })
+        const reply = prependActionLead(
+          generateComplexPackagingQuoteReply(quoteResult),
+          complexPackagingTurn.action,
+          complexPackagingTurn.targetItemTitle,
+        )
+        const packagingProductType = quoteResult.normalizedParams?.productType || complexPackagingRequest.mainItem.productType
+        const productSchema = getProductSchema(packagingProductType)
+        const unit = getProductUnit(packagingProductType)
+
+        logRouterDispatch({
+          conversationId,
+          requestId,
+          message: payload.message,
+          routerIntent: agentRoute.intent,
+          finalIntent: intentResult.intent,
+          branch: 'complex_packaging_quoted',
+          responseStatus: 'quoted',
+          usedRag: false,
+          executedHandoff: false,
+          executedQuoteEngine: true,
+        })
+
+        await createQuoteRecord({
+          conversationId,
+          productType: packagingProductType,
+          summary: `${productSchema.nameZh}询价 ${complexPackagingRequest.mainItem.quantity || 0}${unit}`,
+          unitPrice: quoteResult.unitPrice,
+          totalPrice: quoteResult.totalPrice,
+          shippingFee: quoteResult.shippingFee,
+          tax: quoteResult.tax,
+          finalPrice: quoteResult.finalPrice,
+          normalizedParams: {
+            ...quoteResult.normalizedParams,
+            mainItem: quoteResult.mainItem.normalizedParams,
+            subItems: quoteResult.subItems.map((item) => item.normalizedParams),
+            isBundle: quoteResult.isBundle,
+            requiresHumanReview: quoteResult.requiresHumanReview,
+            referenceFiles: quoteResult.referenceFiles,
+          },
+          pricingDetails: {
+            unitPrice: quoteResult.unitPrice,
+            totalUnitPrice: quoteResult.totalUnitPrice,
+            totalPrice: quoteResult.totalPrice,
+            shippingFee: quoteResult.shippingFee,
+            tax: quoteResult.tax,
+            finalPrice: quoteResult.finalPrice,
+            notes: quoteResult.notes,
+            items: quoteResult.items,
+            packagingReview,
+            referenceFiles: quoteResult.referenceFiles,
+          },
+        })
+
+        await updateConversationStatus(conversationId, 'QUOTED')
+        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+          intent: intentResult.intent,
+          intentReason: intentResult.reason,
+          responseStatus: 'quoted',
+          complexPackagingDecision: decision,
+          complexPackagingState: complexPackagingRequest,
+          complexPackagingShadow,
+          quoteParams: quoteResult.normalizedParams,
+          quoteItems: quoteResult.items,
+          packagingReview,
+          referenceFiles: quoteResult.referenceFiles,
+          requiresHumanReview: quoteResult.requiresHumanReview,
+          conversationAction: complexPackagingTurn.action,
+          conversationActionTargetItemType: complexPackagingTurn.targetItemType,
+          conversationActionTargetItemTitle: complexPackagingTurn.targetItemTitle,
+        })
+
+        return respond({
+          ok: true,
+          status: 'quoted',
+          intent: intentResult.intent,
+          intentReason: intentResult.reason,
+          conversationId,
+          data: quoteResult,
+          reply,
+          complexPackagingState: complexPackagingRequest,
+          packagingReview,
+          referenceFiles: quoteResult.referenceFiles,
+          requiresHumanReview: quoteResult.requiresHumanReview,
+          conversationAction: complexPackagingTurn.action,
+          conversationActionTargetItemType: complexPackagingTurn.targetItemType,
+          conversationActionTargetItemTitle: complexPackagingTurn.targetItemTitle,
         })
       }
 
@@ -954,12 +1615,12 @@ export function createChatPostHandler(
         }
       }
 
-      currentExtracted = activeRecommendedParams
-        ? sanitizeExtractedParamsForRecommendation(currentExtracted, activeRecommendedParams)
+      currentExtracted = scopedRecommendedParams
+        ? sanitizeExtractedParamsForRecommendation(currentExtracted, scopedRecommendedParams)
         : currentExtracted
 
-      const recommendationPatchResult = activeRecommendedParams && (intentResult.intent === 'RECOMMENDATION_CONFIRMATION' || canPatchRecommendation(intentResult.intent))
-        ? applyRecommendedPatch(activeRecommendedParams, payload.message)
+      const recommendationPatchResult = scopedRecommendedParams && (intentResult.intent === 'RECOMMENDATION_CONFIRMATION' || canPatchRecommendation(intentResult.intent))
+        ? applyRecommendedPatch(scopedRecommendedParams, payload.message)
         : null
       timing.mark('recommendation_patch_evaluated')
 
@@ -967,13 +1628,13 @@ export function createChatPostHandler(
         recommendationPatchResult && Object.keys(recommendationPatchResult.patchParams).length > 0
       )
 
-      if (intentResult.intent === 'PARAM_SUPPLEMENT' && activeRecommendedParams && hasRecommendationPatch) {
+      if (intentResult.intent === 'PARAM_SUPPLEMENT' && scopedRecommendedParams && hasRecommendationPatch) {
         const updatedRecommendationPayload = {
-          productType: activeRecommendedParams.productType,
+          productType: scopedRecommendedParams.productType,
           recommendedParams: recommendationPatchResult!.mergedRecommendedParams,
-          note: activeRecommendedParams.note,
+          note: scopedRecommendedParams.note,
         }
-        const reply = generateRecommendationUpdatedReply(recommendationPatchResult?.patchSummary)
+        const reply = generateRecommendationUpdatedReply(recommendationPatchResult?.patchSummary, scopedRecommendedParams.productType)
 
         logRouterDispatch({
           conversationId,
@@ -1012,29 +1673,29 @@ export function createChatPostHandler(
         })
       }
 
-      const recommendationBaseParams = activeRecommendedParams && (intentResult.intent === 'RECOMMENDATION_CONFIRMATION' || canPatchRecommendation(intentResult.intent))
+      const recommendationBaseParams = scopedRecommendedParams && (intentResult.intent === 'RECOMMENDATION_CONFIRMATION' || canPatchRecommendation(intentResult.intent))
         ? sanitizeQuoteParams(buildRecommendationBaseParams(
             recommendationPatchResult
               ? {
-                  productType: activeRecommendedParams.productType,
+                  productType: scopedRecommendedParams.productType,
                   recommendedParams: recommendationPatchResult.mergedRecommendedParams,
-                  note: activeRecommendedParams.note,
+                  note: scopedRecommendedParams.note,
                 }
-              : activeRecommendedParams,
-            activeHistoricalParams
+              : scopedRecommendedParams,
+            scopedHistoricalParams
           ) || {})
         : null
 
       const debugExtractedParams = buildDebugExtractedParams(
         currentExtracted,
-        recommendationBaseParams?.productType || activeRecommendedParams?.productType || activeHistoricalParams?.productType
+        recommendationBaseParams?.productType || scopedRecommendedParams?.productType || scopedHistoricalParams?.productType
       )
 
       let mergedParams: Record<string, any> = sanitizeQuoteParams({ ...currentExtracted })
       if (recommendationBaseParams) {
         mergedParams = sanitizeQuoteParams(mergeParameters(recommendationBaseParams, currentExtracted))
-      } else if (activeHistoricalParams) {
-        mergedParams = sanitizeQuoteParams(mergeParameters(activeHistoricalParams, currentExtracted))
+      } else if (scopedHistoricalParams) {
+        mergedParams = sanitizeQuoteParams(mergeParameters(scopedHistoricalParams, currentExtracted))
       }
 
       const missingFields = checkMissingFields(mergedParams)
@@ -1047,7 +1708,10 @@ export function createChatPostHandler(
       timing.mark('route_decided')
 
       if (routeDecision.status === 'handoff_required') {
-        const reply = generateHandoffReply()
+        const isSimpleProductDeactivated = routeDecision.reason === 'simple_product_auto_quote_deactivated'
+        const reply = isSimpleProductDeactivated
+          ? generateSimpleProductDeactivatedReply(mergedParams.productType)
+          : generateHandoffReply()
 
         logRouterDispatch({
           conversationId,
@@ -1063,7 +1727,13 @@ export function createChatPostHandler(
         })
 
         await updateConversationStatus(conversationId, 'PENDING_HUMAN')
-        await createHandoffRecord(conversationId, '非标准或高风险询价，需人工接管', 'sales_team')
+        await createHandoffRecord(
+          conversationId,
+          isSimpleProductDeactivated
+            ? '简单印刷品自动报价已停用，需人工接管'
+            : '非标准或高风险询价，需人工接管',
+          'sales_team'
+        )
         await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
           intent: intentResult.intent,
           intentReason: intentResult.reason,

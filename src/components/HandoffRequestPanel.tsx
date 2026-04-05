@@ -110,7 +110,7 @@ export function HandoffRequestPanel(props: HandoffRequestPanelProps) {
           <div className='w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl'>
             <div className='flex items-start justify-between gap-4'>
               <div>
-                <p className='text-sm font-medium uppercase tracking-[0.18em] text-slate-500'>Handoff</p>
+                <p className='text-sm font-medium tracking-[0.18em] text-slate-500'>人工协同</p>
                 <h3 className='mt-2 text-xl font-bold text-slate-900'>人工处理入口</h3>
                 <p className='mt-2 text-sm text-slate-600'>
                   {props.alreadyPending

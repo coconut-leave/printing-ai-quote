@@ -1,0 +1,87 @@
+{
+  "batchId": "2026-04-05-image-quote-samples",
+  "sourceType": "chat_image_attachments",
+  "originalImageStatus": "pending_manual_copy_to_workspace",
+  "targetImageDirectory": "data/quotes/images",
+  "records": [
+    {
+      "recordId": "fireproof_file_bag_quote_sheet",
+      "expectedImageFile": "data/quotes/images/2026-04-05-fireproof-file-bag-quote.png",
+      "transcriptFile": "data/quotes/images/2026-04-05-fireproof-file-bag-quote.md",
+      "wholeOrderType": "multi_line_non_bundle",
+      "mainItemSamples": [
+        {
+          "productName": "防火风琴文件包飞机盒",
+          "packagingTypeCandidate": "mailer_box",
+          "recommendedBucket": "mailer_box_reinforced_boundary"
+        },
+        {
+          "productName": "防火风琴文件包双插盒",
+          "packagingTypeCandidate": "tuck_end_box",
+          "recommendedBucket": "tuck_end_box_reinforced_estimated_boundary_samples"
+        }
+      ],
+      "cleanSubsetValue": "not_standard_clean_subset",
+      "notes": [
+        "AE加强芯 is useful for material-recipe parsing and reinforced boundary checks.",
+        "The tuck-end line is not clean enough to replace a textbook standard tuck-end clean subset sample."
+      ]
+    },
+    {
+      "recordId": "window_color_box_quote_sheet",
+      "expectedImageFile": "data/quotes/images/2026-04-05-window-color-box-quote.png",
+      "transcriptFile": "data/quotes/images/2026-04-05-window-color-box-quote.md",
+      "wholeOrderType": "single_main_item",
+      "mainItemSamples": [
+        {
+          "productName": "开窗彩盒",
+          "packagingTypeCandidate": "window_box",
+          "recommendedBucket": "window_box_deferred_glossary_samples"
+        }
+      ],
+      "cleanSubsetValue": "not_tuck_end_clean_subset",
+      "notes": [
+        "Strong source for window-film thickness and window-size glossary coverage.",
+        "Best used for deferred / window-related boundary verification."
+      ]
+    },
+    {
+      "recordId": "tuck_end_bundle_quote_sheet",
+      "expectedImageFile": "data/quotes/images/2026-04-05-tuck-end-bundle-quote.png",
+      "transcriptFile": "data/quotes/images/2026-04-05-tuck-end-bundle-quote.md",
+      "wholeOrderType": "bundle_with_companions",
+      "wholeOrderRecommendedBucket": "bundle_reference_only",
+      "mainItemSamples": [
+        {
+          "productName": "双插盒",
+          "packagingTypeCandidate": "tuck_end_box",
+          "recommendedBucket": "tuck_end_box_clean_subset_pending_review",
+          "cleanSubsetStrength": "high_main_item_only"
+        }
+      ],
+      "companionSamples": [
+        {
+          "productName": "内托",
+          "recommendedBucket": "bundle_companion_insert"
+        },
+        {
+          "productName": "说明书",
+          "recommendedBucket": "leaflet_companion"
+        },
+        {
+          "productName": "透明贴纸",
+          "recommendedBucket": "seal_sticker_companion"
+        }
+      ],
+      "notes": [
+        "The whole image should not be treated as one clean subset sample.",
+        "The first line is the strongest new tuck-end clean-subset lead if ingested as a main-item-only sample."
+      ]
+    }
+  ],
+  "nextMostUsefulAdditions": [
+    "Keep the main-item line from the tuck-end bundle image in tuck_end_box_clean_subset_pending_review until it has been reviewed as a split main-item sample instead of a bundle order.",
+    "Formally admit the AE加强芯 double-insert sample only into the reinforced estimated-boundary support bucket, not into clean subset.",
+    "Formally admit the window color box image only into the window-box deferred/glossary support bucket, not into the first quoted path."
+  ]
+}

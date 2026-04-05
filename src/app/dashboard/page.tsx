@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { AdminPageNav } from '@/components/AdminPageNav'
+import { getProductTypeDisplayName } from '@/lib/admin/presentation'
 
 type DashboardResponse = {
   period: {
@@ -56,6 +57,15 @@ type DashboardResponse = {
     missingFieldsCount: number
     handoffRequiredCount: number
   }>
+  nonActiveProductTypeBreakdown: Array<{
+    productType: string
+    quotedCount: number
+    estimatedCount: number
+    missingFieldsCount: number
+    handoffRequiredCount: number
+  }>
+  activeAutoQuoteProductTypes: string[]
+  nonActiveProductRecordCount: number
   learningOverview: {
     reflectionCount: number
     approvedReflectionCount: number
@@ -118,16 +128,7 @@ function formatField(field: string) {
 }
 
 function formatProductType(productType: string) {
-  const map: Record<string, string> = {
-    album: '画册',
-    flyer: '传单',
-    business_card: '名片',
-    poster: '海报',
-    sticker: '贴纸',
-    paper_bag: '纸袋',
-    unknown: '未识别',
-  }
-  return map[productType] || productType
+  return getProductTypeDisplayName(productType)
 }
 
 function formatDelta(delta: number) {
@@ -172,9 +173,9 @@ export default function DashboardPage() {
         <AdminPageNav current='dashboard' />
         <div className="mb-8 flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+            <h1 className="text-3xl font-bold text-gray-900">运营看板</h1>
             <p className="mt-2 text-gray-600">
-              汇总报价主链路、咨询链路和 learning system 的关键指标，只复用现有 metadata 与统计逻辑，不引入新的业务判定。
+              汇总当前活跃复杂包装主链路、咨询链路和学习闭环的关键指标，只复用现有 metadata 与统计逻辑，不引入新的业务判定。
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               {PERIOD_OPTIONS.map((option) => (
@@ -195,7 +196,7 @@ export default function DashboardPage() {
               查看会话
             </Link>
             <Link href="/learning-dashboard" className="rounded border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
-              Learning Dashboard
+              学习看板
             </Link>
           </div>
         </div>
@@ -205,29 +206,34 @@ export default function DashboardPage() {
         {!loading && stats && (
           <>
             <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-              当前窗口：{stats.period.label}。基于最近 {stats.sampledConversationCount} 个 conversation 样本和当前 reflection 数据聚合，同时对比上一等长周期，用于观察链路趋势，不替代详细后台页面。
+              当前窗口：{stats.period.label}。基于最近 {stats.sampledConversationCount} 个会话样本和当前反思记录聚合，同时对比上一等长周期，用于观察链路趋势，不替代详细后台页面。
+            </div>
+
+            <div className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+              主统计当前只展示活跃复杂包装自动报价范围：{stats.activeAutoQuoteProductTypes.map(formatProductType).join('、')}。
+              {stats.nonActiveProductRecordCount > 0 && ` 已将 ${stats.nonActiveProductRecordCount} 条非当前活跃品类链路记录移出主统计，避免干扰运营判断。`}
             </div>
 
             <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              learning 区域当前只有 reflection 记录是数据库持久化的；improvement / action 的状态和实施备注仍主要来自进程内存。
-              因此 Dashboard 中 learning 指标更适合演示和人工研判，不应当作正式长期台账或跨重启精确统计口径。
+              学习区当前只有反思记录是数据库持久化的；改进建议和执行动作的状态、实施备注仍主要来自进程内存。
+              因此看板中的学习指标更适合演示和人工研判，不应当作正式长期台账或跨重启精确统计口径。
             </div>
 
             <div className="mb-8 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
               <div className="font-semibold text-amber-950">上线后优先看这 4 组指标</div>
-              <div className="mt-2">1. `quoted` 和 `consultation → quoted`：确认系统是否真的把询价推进到成交前一步。</div>
-              <div>2. `missing_fields`：如果持续偏高，优先看缺失字段 TOP，说明补参效率或参数抽取需要排查。</div>
-              <div>3. `handoff_required` 和转人工原因 TOP：观察是否出现异常放量，避免标准询价大量流失到人工。</div>
-              <div>4. `consultation → recommendation_confirmation`：判断推荐方案是否能把咨询流量继续推进到正式报价。</div>
+              <div className="mt-2">1. 正式报价 和 咨询进入正式报价：确认系统是否真的把询价推进到成交前一步。</div>
+              <div>2. 待补参数：如果持续偏高，优先看缺失字段 TOP，说明补参效率或参数抽取需要排查。</div>
+              <div>3. 人工复核 和转人工原因 TOP：观察是否出现异常放量，避免标准询价大量流失到人工。</div>
+              <div>4. 咨询进入推荐确认：判断推荐方案是否能把咨询流量继续推进到正式报价。</div>
             </div>
 
             <div className="mb-8">
-              <h2 className="mb-4 text-lg font-semibold text-gray-900">报价链路概览</h2>
+              <h2 className="mb-4 text-lg font-semibold text-gray-900">当前活跃复杂包装报价链路</h2>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-lg bg-white p-4 shadow"><div className="text-sm text-gray-600">quoted</div><div className="mt-1 text-2xl font-bold text-gray-900">{stats.quotePathOverview.quotedCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.quotePathTrend.quotedCountDelta)}</div></div>
-                <div className="rounded-lg bg-white p-4 shadow"><div className="text-sm text-gray-600">estimated</div><div className="mt-1 text-2xl font-bold text-gray-900">{stats.quotePathOverview.estimatedCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.quotePathTrend.estimatedCountDelta)}</div></div>
-                <div className="rounded-lg bg-white p-4 shadow"><div className="text-sm text-gray-600">missing_fields</div><div className="mt-1 text-2xl font-bold text-gray-900">{stats.quotePathOverview.missingFieldsCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.quotePathTrend.missingFieldsCountDelta)}</div></div>
-                <div className="rounded-lg bg-white p-4 shadow"><div className="text-sm text-gray-600">handoff_required</div><div className="mt-1 text-2xl font-bold text-gray-900">{stats.quotePathOverview.handoffRequiredCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.quotePathTrend.handoffRequiredCountDelta)}</div></div>
+                <div className="rounded-lg bg-white p-4 shadow"><div className="text-sm text-gray-600">正式报价</div><div className="mt-1 text-2xl font-bold text-gray-900">{stats.quotePathOverview.quotedCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.quotePathTrend.quotedCountDelta)}</div></div>
+                <div className="rounded-lg bg-white p-4 shadow"><div className="text-sm text-gray-600">参考报价</div><div className="mt-1 text-2xl font-bold text-gray-900">{stats.quotePathOverview.estimatedCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.quotePathTrend.estimatedCountDelta)}</div></div>
+                <div className="rounded-lg bg-white p-4 shadow"><div className="text-sm text-gray-600">待补参数</div><div className="mt-1 text-2xl font-bold text-gray-900">{stats.quotePathOverview.missingFieldsCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.quotePathTrend.missingFieldsCountDelta)}</div></div>
+                <div className="rounded-lg bg-white p-4 shadow"><div className="text-sm text-gray-600">人工复核</div><div className="mt-1 text-2xl font-bold text-gray-900">{stats.quotePathOverview.handoffRequiredCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.quotePathTrend.handoffRequiredCountDelta)}</div></div>
               </div>
             </div>
 
@@ -235,10 +241,10 @@ export default function DashboardPage() {
               <div className="rounded-lg bg-white p-6 shadow">
                 <h2 className="mb-4 text-lg font-semibold text-gray-900">咨询链路概览</h2>
                 <div className="mb-4 grid grid-cols-2 gap-3 text-sm text-gray-700">
-                  <div className="rounded border border-gray-100 p-3">带 recommendedParams 的咨询<div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationOverview.consultationWithRecommendedParamsCount}</div></div>
-                  <div className="rounded border border-gray-100 p-3">consultation → recommendation_confirmation<div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationOverview.consultationToRecommendationConfirmationCount}</div></div>
-                  <div className="rounded border border-gray-100 p-3">consultation → estimated<div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationOverview.consultationToEstimatedCount}</div></div>
-                  <div className="rounded border border-gray-100 p-3">consultation → quoted<div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationOverview.consultationToQuotedCount}</div></div>
+                  <div className="rounded border border-gray-100 p-3">带推荐参数的咨询<div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationOverview.consultationWithRecommendedParamsCount}</div></div>
+                  <div className="rounded border border-gray-100 p-3">咨询进入推荐确认<div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationOverview.consultationToRecommendationConfirmationCount}</div></div>
+                  <div className="rounded border border-gray-100 p-3">咨询进入参考报价<div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationOverview.consultationToEstimatedCount}</div></div>
+                  <div className="rounded border border-gray-100 p-3">咨询进入正式报价<div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationOverview.consultationToQuotedCount}</div></div>
                 </div>
                 <div className="space-y-3">
                   {stats.consultationOverview.consultationIntentDistribution.map((item) => (
@@ -253,26 +259,26 @@ export default function DashboardPage() {
               <div className="rounded-lg bg-white p-6 shadow">
                 <h2 className="mb-4 text-lg font-semibold text-gray-900">咨询 → 推荐 → 报价漏斗</h2>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
-                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">consultation_reply</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationFunnel.consultationReplyCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.consultationFunnelTrend.consultationReplyCountDelta)}</div></div>
-                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">recommended consultation</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationFunnel.consultationWithRecommendedParamsCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.consultationFunnelTrend.consultationWithRecommendedParamsCountDelta)}</div></div>
-                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">recommendation_confirmation</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationFunnel.recommendationConfirmationCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.consultationFunnelTrend.recommendationConfirmationCountDelta)}</div></div>
-                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">estimated</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationFunnel.estimatedCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.consultationFunnelTrend.estimatedCountDelta)}</div></div>
-                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">quoted</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationFunnel.quotedCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.consultationFunnelTrend.quotedCountDelta)}</div></div>
+                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">咨询回复</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationFunnel.consultationReplyCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.consultationFunnelTrend.consultationReplyCountDelta)}</div></div>
+                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">带推荐参数的咨询</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationFunnel.consultationWithRecommendedParamsCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.consultationFunnelTrend.consultationWithRecommendedParamsCountDelta)}</div></div>
+                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">推荐确认</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationFunnel.recommendationConfirmationCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.consultationFunnelTrend.recommendationConfirmationCountDelta)}</div></div>
+                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">参考报价</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationFunnel.estimatedCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.consultationFunnelTrend.estimatedCountDelta)}</div></div>
+                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">正式报价</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.consultationFunnel.quotedCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.consultationFunnelTrend.quotedCountDelta)}</div></div>
                 </div>
               </div>
             </div>
 
             <div className="mb-8 rounded-lg bg-white p-6 shadow">
-              <h2 className="mb-4 text-lg font-semibold text-gray-900">按 productType 拆分的链路表现</h2>
+              <h2 className="mb-4 text-lg font-semibold text-gray-900">按当前活跃复杂包装品类拆分的链路表现</h2>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200 text-sm">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-4 py-3 text-left font-medium text-gray-700">productType</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-700">quoted</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-700">estimated</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-700">missing_fields</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-700">handoff_required</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-700">品类</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-700">正式报价</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-700">参考报价</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-700">待补参数</th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-700">人工复核</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
@@ -295,15 +301,55 @@ export default function DashboardPage() {
               </div>
             </div>
 
+            {stats.nonActiveProductRecordCount > 0 && (
+              <div className="mb-8 rounded-lg border border-slate-200 bg-slate-50 p-6 shadow-sm">
+                <div className="mb-4 flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-900">已移出主看板的历史品类记录</h2>
+                    <p className="mt-1 text-sm text-slate-600">
+                      下表仅用于历史观察，包含简单品类或未归入当前活跃复杂包装自动报价范围的记录，不参与上方主统计口径。
+                    </p>
+                  </div>
+                  <div className="rounded-full bg-white px-3 py-1 text-sm font-medium text-slate-700 shadow-sm">
+                    共 {stats.nonActiveProductRecordCount} 条链路记录
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead className="bg-white">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-medium text-slate-700">品类</th>
+                        <th className="px-4 py-3 text-left font-medium text-slate-700">正式报价</th>
+                        <th className="px-4 py-3 text-left font-medium text-slate-700">参考报价</th>
+                        <th className="px-4 py-3 text-left font-medium text-slate-700">待补参数</th>
+                        <th className="px-4 py-3 text-left font-medium text-slate-700">人工复核</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {stats.nonActiveProductTypeBreakdown.map((item) => (
+                        <tr key={item.productType} className="bg-white">
+                          <td className="px-4 py-3 font-medium text-slate-900">{formatProductType(item.productType)}</td>
+                          <td className="px-4 py-3 text-slate-700">{item.quotedCount}</td>
+                          <td className="px-4 py-3 text-slate-700">{item.estimatedCount}</td>
+                          <td className="px-4 py-3 text-slate-700">{item.missingFieldsCount}</td>
+                          <td className="px-4 py-3 text-slate-700">{item.handoffRequiredCount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-1">
               <div className="rounded-lg bg-white p-6 shadow">
                 <h2 className="mb-4 text-lg font-semibold text-gray-900">学习闭环概览</h2>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">reflection 总数</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.reflectionCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.reflectionCountDelta)}</div></div>
-                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">APPROVED reflection</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.approvedReflectionCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.approvedReflectionCountDelta)}</div></div>
-                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">ACCEPTED improvement</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.acceptedImprovementCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.acceptedImprovementCountDelta)}</div></div>
-                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">IMPLEMENTED action</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.implementedActionCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.implementedActionCountDelta)}</div></div>
-                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">VERIFIED action</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.verifiedActionCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.verifiedActionCountDelta)}</div></div>
+                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">反思记录总数</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.reflectionCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.reflectionCountDelta)}</div></div>
+                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">已通过反思记录</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.approvedReflectionCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.approvedReflectionCountDelta)}</div></div>
+                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">已采纳改进建议</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.acceptedImprovementCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.acceptedImprovementCountDelta)}</div></div>
+                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">已落地执行动作</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.implementedActionCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.implementedActionCountDelta)}</div></div>
+                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">已验证执行动作</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.verifiedActionCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.verifiedActionCountDelta)}</div></div>
                 </div>
               </div>
             </div>

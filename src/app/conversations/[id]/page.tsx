@@ -3,49 +3,46 @@
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
+import { type ConversationDetailPayload, normalizeConversationDetailPayload } from '@/lib/admin/conversationDetail'
+import {
+  buildConversationPresentation,
+  getConversationStatusLabel,
+  getQuoteRecordStatusLabel,
+  getReflectionRecordStatusLabel,
+} from '@/lib/admin/presentation'
 import { formatParamsByProduct, getMissingFieldsChineseText } from '@/lib/catalog/helpers'
 import { AdminPageNav } from '@/components/AdminPageNav'
 import { HandoffRequestPanel } from '@/components/HandoffRequestPanel'
-import { REFLECTION_ISSUE_TYPE_OPTIONS, getReflectionIssueTypeLabel, type ReflectionIssueType } from '@/lib/reflection/issueTypes'
-
-type ConversationDetails = {
-  id: number
-  status: string
-  createdAt: string
-  updatedAt: string
-  messages: Array<{
-    id: number
-    sender: string
-    content: string
-    metadata?: any
-    createdAt: string
-  }>
-  quotes: Array<{
-    id: number
-    parameters: any
-    subtotalCents: number
-    shippingCents: number
-    taxCents: number
-    totalCents: number
-    status: string
-    createdAt: string
-  }>
-  handoffs: Array<{
-    id: number
-    reason: string
-    assignedTo: string | null
-    resolved: boolean
-    createdAt: string
-  }>
-  reflections: Array<{
-    id: number
-    issueType: ReflectionIssueType
-    reflectionText: string
-    suggestionDraft: string
-    status: 'NEW' | 'REVIEWED' | 'APPROVED' | 'REJECTED'
-    createdAt: string
-  }>
-}
+import { PackagingCorrectedParamsEditor } from '@/components/PackagingCorrectedParamsEditor'
+import { PackagingReflectionDiff } from '@/components/PackagingReflectionDiff'
+import { buildReflectionContextSummary } from '@/lib/reflection/context'
+import {
+  buildPackagingDraftSeed,
+  resolvePackagingDraftOnIssueTypeChange,
+} from '@/lib/reflection/packagingEditorState'
+import {
+  addPackagingDraftReviewReason,
+  addPackagingDraftSubItem,
+  buildPackagingCorrectedParamsPayload,
+  removePackagingDraftReviewReason,
+  removePackagingDraftSubItem,
+  updatePackagingDraftMainItem,
+  updatePackagingDraftRequiresHumanReview,
+  updatePackagingDraftReviewReason,
+  updatePackagingDraftSubItem,
+  type PackagingCorrectedParamsDraft,
+} from '@/lib/reflection/packagingCorrectedParams'
+import {
+  isPackagingReflectionIssueType,
+  REFLECTION_ISSUE_TYPE_OPTIONS,
+  getReflectionIssueTypeLabel,
+  type ReflectionIssueType,
+} from '@/lib/reflection/issueTypes'
+import {
+  buildPackagingReviewSummaryFromQuoteRecord,
+  normalizePackagingReviewSummaryView,
+  type PackagingReviewSummaryView,
+} from '@/lib/packaging/reviewSummary'
 
 function formatParams(params: any, productType?: string): string {
   if (!params) return ''
@@ -58,6 +55,7 @@ function ParameterInfo({ message }: { message: any }) {
 
   const { extractedParams, mergedParams, quoteParams, missingFields } = metadata
   const productType = quoteParams?.productType || mergedParams?.productType || extractedParams?.productType
+  const packagingReview = normalizePackagingReviewSummaryView(metadata.packagingReview)
 
   return (
     <div className='mt-3 space-y-2 rounded bg-slate-100 p-3 text-xs'>
@@ -85,12 +83,96 @@ function ParameterInfo({ message }: { message: any }) {
           <div className='text-green-600'>{formatParams(quoteParams, productType)}</div>
         </div>
       )}
+      {packagingReview && <PackagingReviewCard summary={packagingReview} compact />}
+      {metadata.packagingReview && !packagingReview && (
+        <div className='rounded border border-slate-200 bg-white px-3 py-2 text-slate-500'>暂无结构化包装说明</div>
+      )}
+    </div>
+  )
+}
+
+function PackagingReviewCard({
+  summary,
+  compact = false,
+}: {
+  summary: PackagingReviewSummaryView
+  compact?: boolean
+}) {
+  return (
+    <div className={`rounded border border-slate-200 bg-white ${compact ? 'p-3' : 'p-4'}`}>
+      <div className='flex flex-wrap items-start justify-between gap-3'>
+        <div>
+          <p className='text-sm font-semibold text-slate-900'>包装报价说明</p>
+          <p className='mt-1 text-sm text-slate-700'>{summary.statusLabel}：{summary.statusReasonText}</p>
+          {summary.conciseExplanation && (
+            <p className='mt-1 text-sm text-slate-600'>{summary.conciseExplanation}</p>
+          )}
+        </div>
+        <div className='rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white'>
+          {summary.statusLabel}
+        </div>
+      </div>
+
+      {!compact && (
+        <div className='mt-3 grid gap-3 md:grid-cols-2'>
+          <div className='rounded bg-slate-50 p-3 text-sm text-slate-700'>
+            {summary.mainItem && <div>主件：{summary.mainItem.title}</div>}
+            {summary.subItems.length > 0 && <div>配套件：{summary.subItems.map((item) => item.title).join('、')}</div>}
+            {typeof summary.subtotal === 'number' && <div>产品小计：¥{summary.subtotal}</div>}
+            {typeof summary.shippingFee === 'number' && <div>运费：¥{summary.shippingFee}</div>}
+            {typeof summary.finalPrice === 'number' && <div>最终价格：¥{summary.finalPrice}</div>}
+            {typeof summary.totalUnitPrice === 'number' && <div>{summary.lineItems.length > 1 ? '组合单套价' : '总单价'}：¥{summary.totalUnitPrice}</div>}
+          </div>
+          {(summary.reviewReasons.length > 0 || summary.reviewFlags.length > 0) && (
+            <div className='rounded bg-amber-50 p-3 text-sm text-amber-900'>
+              <p className='font-semibold'>复核原因</p>
+              <div className='mt-2 space-y-1'>
+                {summary.reviewReasons.map((reason) => (
+                  <div key={`${reason.code}-${reason.itemTitle || 'overall'}`}>{reason.message}</div>
+                ))}
+                {summary.reviewReasons.length === 0 && summary.reviewFlags.map((flag) => (
+                  <div key={flag}>{flag}</div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className='mt-3 space-y-2'>
+        {summary.missingDetails.map((detail) => (
+          <div key={`${detail.itemIndex}-${detail.productType}`} className='rounded bg-yellow-50 px-3 py-2 text-sm text-yellow-900'>
+            {detail.itemLabel} 仍缺少：{detail.fieldsText}
+          </div>
+        ))}
+        {summary.lineItems.map((item, index) => (
+          <div key={`${item.itemType}-${index}`} className='rounded bg-slate-50 p-3 text-sm text-slate-700'>
+            <div className='flex flex-wrap items-start justify-between gap-3'>
+              <div>
+                <div className='font-semibold text-slate-900'>{item.title}</div>
+                <div className='text-slate-600'>{item.normalizedSpecSummary}</div>
+              </div>
+              <div className='text-right'>
+                <div>数量：{item.quantity}</div>
+                <div>单价：¥{item.unitPrice}</div>
+                <div>小计：¥{item.lineTotal}</div>
+              </div>
+            </div>
+            <div className='mt-2 grid gap-2 md:grid-cols-2'>
+              <div>材质 / 克重：{item.materialWeightSummary}</div>
+              <div>印色：{item.printColorSummary}</div>
+              <div>工艺：{item.processSummary}</div>
+              <div>开机费：¥{item.setupCost} / 运行费：¥{item.runCost}</div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
 
 export default function ConversationDetailPage() {
-  const [conversation, setConversation] = useState<ConversationDetails | null>(null)
+  const [conversation, setConversation] = useState<ConversationDetailPayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
@@ -98,6 +180,7 @@ export default function ConversationDetailPage() {
   const [reflectionIssueType, setReflectionIssueType] = useState<ReflectionIssueType>('PARAM_WRONG')
   const [correctedParamsText, setCorrectedParamsText] = useState('')
   const [correctedQuoteSummary, setCorrectedQuoteSummary] = useState('')
+  const [packagingDraft, setPackagingDraft] = useState<PackagingCorrectedParamsDraft | null>(null)
 
   const params = useParams<{ id: string | string[] }>()
   const rawConversationId = Array.isArray(params?.id) ? params.id[0] : params?.id
@@ -106,6 +189,43 @@ export default function ConversationDetailPage() {
   const latestCustomerMessage = conversation?.messages
     ?.filter((message) => message.sender === 'CUSTOMER')
     .slice(-1)[0]
+  const latestAssistantMessage = conversation?.messages
+    ?.filter((message) => message.sender === 'ASSISTANT')
+    .slice(-1)[0]
+  const latestQuote = conversation?.quotes?.[0]
+  const hasCurrentExportableResult = Boolean(
+    latestQuote
+    || conversation?.messages?.some((message) => {
+      const metadata = message.metadata && typeof message.metadata === 'object'
+        ? message.metadata as Record<string, any>
+        : undefined
+
+      return message.sender === 'ASSISTANT'
+        && ['estimated', 'quoted'].includes(String(metadata?.responseStatus || ''))
+    })
+  )
+  const latestAssistantMetadata = latestAssistantMessage?.metadata && typeof latestAssistantMessage.metadata === 'object'
+    ? latestAssistantMessage.metadata as Record<string, any>
+    : undefined
+  const conversationPresentation = conversation ? buildConversationPresentation({
+    conversationId: conversation.id,
+    status: conversation.status,
+    latestMessage: latestCustomerMessage?.content || latestAssistantMessage?.content || null,
+    recentMessages: [...(conversation.messages || [])]
+      .slice()
+      .reverse()
+      .slice(0, 4)
+      .map((message) => ({
+        sender: message.sender,
+        content: message.content,
+        metadata: message.metadata,
+      })),
+    latestQuoteParameters: latestQuote?.parameters,
+  }) : null
+  const packagingCorrectedParams = packagingDraft
+    ? buildPackagingCorrectedParamsPayload(packagingDraft)
+    : undefined
+  const showPackagingTemplate = isPackagingReflectionIssueType(reflectionIssueType) && Boolean(packagingCorrectedParams)
 
   const loadConversation = async () => {
     if (Number.isNaN(conversationId)) {
@@ -122,7 +242,13 @@ export default function ConversationDetailPage() {
       })
       const data = await res.json()
       if (data.ok) {
-        setConversation(data.data)
+        const normalizedConversation = normalizeConversationDetailPayload(data.data)
+        if (!normalizedConversation) {
+          setError('会话详情数据格式无效')
+          return
+        }
+
+        setConversation(normalizedConversation)
       } else {
         setError(data.message || '获取会话详情失败')
       }
@@ -144,11 +270,40 @@ export default function ConversationDetailPage() {
     void loadConversation()
   }, [conversationId])
 
+  useEffect(() => {
+    if (!conversation) {
+      setPackagingDraft(null)
+      return
+    }
+
+    setPackagingDraft(buildPackagingDraftSeed({
+      issueType: isPackagingReflectionIssueType(reflectionIssueType)
+        ? reflectionIssueType
+        : 'PACKAGING_PARAM_WRONG',
+      metadata: latestAssistantMetadata,
+      latestQuote,
+    }))
+  }, [conversation?.id, conversation?.updatedAt, latestAssistantMessage?.id, latestQuote?.id])
+
+  useEffect(() => {
+    setPackagingDraft((current) => resolvePackagingDraftOnIssueTypeChange({
+      nextIssueType: reflectionIssueType,
+      currentDraft: current,
+      seedDraft: buildPackagingDraftSeed({
+        issueType: reflectionIssueType,
+        metadata: latestAssistantMetadata,
+        latestQuote,
+      }),
+    }))
+  }, [reflectionIssueType, latestAssistantMessage?.id, latestQuote?.id])
+
   const handleGenerateReflection = async () => {
     if (!conversation || reflectionLoading) return
 
     let correctedParams: Record<string, any> | undefined
-    if (correctedParamsText.trim()) {
+    if (showPackagingTemplate && packagingCorrectedParams) {
+      correctedParams = packagingCorrectedParams
+    } else if (correctedParamsText.trim()) {
       try {
         correctedParams = JSON.parse(correctedParamsText)
       } catch {
@@ -180,14 +335,47 @@ export default function ConversationDetailPage() {
       }
 
       setCorrectedParamsText('')
+      setPackagingDraft(null)
       setCorrectedQuoteSummary('')
-      setSuccessMessage(`Reflection #${data.data.id} 已创建，可前往 Reflections / Learning Dashboard 查看统计变化。`)
+      setSuccessMessage(`反思记录 #${data.data.id} 已创建，可前往反思记录页或学习看板继续查看。`)
       await loadConversation()
     } catch (err) {
       setError(err instanceof Error ? err.message : '生成反思记录失败')
     } finally {
       setReflectionLoading(false)
     }
+  }
+
+  const handleMainItemFieldChange = (field: string, value: unknown) => {
+    setPackagingDraft((current) => (current ? updatePackagingDraftMainItem(current, field, value) : current))
+  }
+
+  const handleSubItemFieldChange = (index: number, field: string, value: unknown) => {
+    setPackagingDraft((current) => (current ? updatePackagingDraftSubItem(current, index, field, value) : current))
+  }
+
+  const handleAddSubItem = (productType: string) => {
+    setPackagingDraft((current) => (current ? addPackagingDraftSubItem(current, productType as any) : current))
+  }
+
+  const handleRemoveSubItem = (index: number) => {
+    setPackagingDraft((current) => (current ? removePackagingDraftSubItem(current, index) : current))
+  }
+
+  const handleReviewReasonChange = (index: number, field: 'label' | 'message', value: string) => {
+    setPackagingDraft((current) => (current ? updatePackagingDraftReviewReason(current, index, field, value) : current))
+  }
+
+  const handleAddReviewReason = () => {
+    setPackagingDraft((current) => (current ? addPackagingDraftReviewReason(current) : current))
+  }
+
+  const handleRemoveReviewReason = (index: number) => {
+    setPackagingDraft((current) => (current ? removePackagingDraftReviewReason(current, index) : current))
+  }
+
+  const handleRequiresHumanReviewChange = (value: boolean) => {
+    setPackagingDraft((current) => (current ? updatePackagingDraftRequiresHumanReview(current, value) : current))
   }
 
   if (loading) {
@@ -234,17 +422,28 @@ export default function ConversationDetailPage() {
     <main className='min-h-screen bg-slate-50 p-4'>
       <div className='mx-auto max-w-4xl space-y-6'>
         <AdminPageNav current='conversations' />
-        <div className='flex items-center justify-between'>
-          <h1 className='text-2xl font-bold'>会话详情 #{conversation.id}</h1>
+        <div className='flex items-start justify-between gap-4'>
+          <div>
+            <h1 className='text-2xl font-bold'>{conversationPresentation?.title || `会话详情 ${conversation.id}`}</h1>
+            <p className='mt-2 text-sm text-slate-600'>{conversationPresentation?.topicSummary || '查看当前会话的消息、报价、人工接管和反思记录。'}</p>
+          </div>
           <div className='flex gap-3 text-sm'>
             <Link href='/conversations' className='text-blue-600 hover:underline'>
               返回列表
             </Link>
+            {hasCurrentExportableResult && (
+              <a
+                href={`/api/conversations/${conversation.id}/export`}
+                className='rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-emerald-800 hover:bg-emerald-100'
+              >
+                导出当前结果 Excel
+              </a>
+            )}
             <Link href='/reflections' className='text-blue-600 hover:underline'>
-              查看 Reflections
+              查看反思记录
             </Link>
             <Link href='/learning-dashboard' className='text-blue-600 hover:underline'>
-              查看 Learning Dashboard
+              查看学习看板
             </Link>
           </div>
         </div>
@@ -268,11 +467,13 @@ export default function ConversationDetailPage() {
                 conversation.status === 'PENDING_HUMAN' ? 'bg-orange-100 text-orange-800' :
                 'bg-gray-100 text-gray-800'
               }`}>
-                {conversation.status === 'OPEN' ? '🔵 进行中' :
-                 conversation.status === 'MISSING_FIELDS' ? '⚠️ 缺参数' :
-                 conversation.status === 'QUOTED' ? '✅ 已报价' :
-                 conversation.status === 'PENDING_HUMAN' ? '👤 人工接管中' :
-                 conversation.status}
+                {getConversationStatusLabel(conversation.status)}
+              </span>
+            </div>
+            <div>
+              <span className='font-medium'>当前归类：</span>
+              <span className='ml-2 rounded bg-slate-100 px-3 py-1 font-medium text-slate-700'>
+                {conversationPresentation?.scopeLabel || '待人工归类'}
               </span>
             </div>
             <div>
@@ -296,8 +497,8 @@ export default function ConversationDetailPage() {
                 </div>
                 <HandoffRequestPanel
                   conversationId={conversation.id}
-                  statusLabel={conversation.status}
-                  summary={latestCustomerMessage?.content || `会话 #${conversation.id} 当前暂无客户摘要。`}
+                  statusLabel={getConversationStatusLabel(conversation.status)}
+                  summary={conversationPresentation?.topicSummary || latestCustomerMessage?.content || `会话 ${conversation.id} 当前暂无客户摘要。`}
                   reason={latestHandoff?.reason || '当前会话需要人工客服继续跟进。'}
                   assignedTo={latestHandoff?.assignedTo || undefined}
                   existingHandoffCount={conversation.handoffs.length}
@@ -339,13 +540,22 @@ export default function ConversationDetailPage() {
           <div className='space-y-3'>
             {conversation.quotes.map((quote) => (
               <div key={quote.id} className='rounded border p-4'>
+                {(() => {
+                  const packagingReview = buildPackagingReviewSummaryFromQuoteRecord({
+                    status: quote.status,
+                    parameters: quote.parameters,
+                    pricingDetails: quote.pricingDetails,
+                  })
+
+                  return (
+                    <>
                 <div className='mb-3 flex items-center justify-between'>
                   <span className='font-medium'>报价 #{quote.id}</span>
                   <div className='flex items-center gap-2'>
                     <span className={`rounded px-2 py-1 text-xs font-medium ${
                       quote.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
                     }`}>
-                      {quote.status}
+                      {getQuoteRecordStatusLabel(quote.status)}
                     </span>
                     <a
                       href={`/api/quotes/${quote.id}/export`}
@@ -355,6 +565,13 @@ export default function ConversationDetailPage() {
                       title='在新窗口中打开报价单'
                     >
                       📄 查看报价单
+                    </a>
+                    <a
+                      href={`/api/quotes/${quote.id}/export?format=xlsx`}
+                      className='inline-block rounded border border-emerald-300 bg-emerald-50 px-3 py-1 text-sm text-emerald-800 hover:bg-emerald-100 transition-colors'
+                      title='导出 Excel 报价单'
+                    >
+                      导出 Excel
                     </a>
                   </div>
                 </div>
@@ -379,6 +596,14 @@ export default function ConversationDetailPage() {
                 <div className='mt-2 text-xs text-gray-500'>
                   创建时间：{new Date(quote.createdAt).toLocaleString()}
                 </div>
+                      {packagingReview && (
+                        <div className='mt-4'>
+                          <PackagingReviewCard summary={packagingReview} />
+                        </div>
+                      )}
+                    </>
+                  )
+                })()}
               </div>
             ))}
             {conversation.quotes.length === 0 && (
@@ -421,7 +646,7 @@ export default function ConversationDetailPage() {
           <div className='mb-4 flex items-center justify-between'>
             <div>
               <h2 className='text-lg font-semibold'>反思记录 ({conversation.reflections?.length || 0})</h2>
-              <p className='mt-1 text-sm text-slate-500'>在当前会话详情中可直接生成 Reflection，生成成功后可在 Reflections 与 Learning Dashboard 中继续查看。</p>
+              <p className='mt-1 text-sm text-slate-500'>在当前会话详情中可直接生成反思记录，生成后可在反思记录页与学习看板继续查看。</p>
             </div>
             <button
               type='button'
@@ -429,7 +654,7 @@ export default function ConversationDetailPage() {
               disabled={reflectionLoading}
               className='rounded bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50'
             >
-              {reflectionLoading ? '生成中...' : '生成 Reflection'}
+              {reflectionLoading ? '生成中...' : '生成反思记录'}
             </button>
           </div>
 
@@ -448,15 +673,34 @@ export default function ConversationDetailPage() {
             </label>
 
             <label className='text-sm'>
-              <span className='mb-1 block font-medium'>修正参数（JSON，可选）</span>
-              <textarea
-                value={correctedParamsText}
-                onChange={(e) => setCorrectedParamsText(e.target.value)}
-                rows={4}
-                placeholder='例如：{"pageCount": 32, "innerWeight": 157}'
-                className='w-full rounded border px-3 py-2 font-mono text-xs'
-              />
+              <span className='mb-1 block font-medium'>修正参数（可选）</span>
+              {showPackagingTemplate && packagingDraft ? (
+                <PackagingCorrectedParamsEditor
+                  issueType={reflectionIssueType}
+                  draft={packagingDraft}
+                  onMainItemFieldChange={handleMainItemFieldChange}
+                  onSubItemFieldChange={handleSubItemFieldChange}
+                  onAddSubItem={handleAddSubItem}
+                  onRemoveSubItem={handleRemoveSubItem}
+                  onReviewReasonChange={handleReviewReasonChange}
+                  onAddReviewReason={handleAddReviewReason}
+                  onRemoveReviewReason={handleRemoveReviewReason}
+                  onRequiresHumanReviewChange={handleRequiresHumanReviewChange}
+                />
+              ) : (
+                <textarea
+                  value={correctedParamsText}
+                  onChange={(e) => setCorrectedParamsText(e.target.value)}
+                  rows={4}
+                  placeholder='例如：{"pageCount": 32, "innerWeight": 157}'
+                  className='w-full rounded border px-3 py-2 font-mono text-xs'
+                />
+              )}
             </label>
+
+            {isPackagingReflectionIssueType(reflectionIssueType) && !showPackagingTemplate && (
+              <p className='text-xs text-amber-700'>当前问题类型属于包装反思，但会话里没有可复用的复杂包装上下文，因此回退为原始 JSON 输入。</p>
+            )}
 
             <label className='text-sm'>
               <span className='mb-1 block font-medium'>修正后报价摘要（可选）</span>
@@ -475,11 +719,22 @@ export default function ConversationDetailPage() {
                 <div className='mb-2 flex items-center justify-between'>
                   <div className='text-sm font-medium'>#{item.id} {getReflectionIssueTypeLabel(item.issueType)}</div>
                   <span className='rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700'>
-                    {item.status}
+                    {getReflectionRecordStatusLabel(item.status)}
                   </span>
                 </div>
                 <p className='mb-2 text-sm'><span className='font-medium'>反思：</span>{item.reflectionText}</p>
                 <p className='text-sm'><span className='font-medium'>建议草案：</span>{item.suggestionDraft}</p>
+                {buildReflectionContextSummary(item.originalExtractedParams, item.correctedParams) && (
+                  <p className='mt-2 text-xs text-slate-500'>
+                    <span className='font-medium'>包装上下文：</span>
+                    {buildReflectionContextSummary(item.originalExtractedParams, item.correctedParams)}
+                  </p>
+                )}
+                <PackagingReflectionDiff
+                  issueType={item.issueType}
+                  originalExtractedParams={item.originalExtractedParams}
+                  correctedParams={item.correctedParams}
+                />
                 <div className='mt-2 text-xs text-gray-500'>
                   创建时间：{new Date(item.createdAt).toLocaleString()}
                 </div>

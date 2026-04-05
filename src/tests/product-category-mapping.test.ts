@@ -33,16 +33,19 @@ function test(name: string, fn: () => void) {
 
 console.log('\n=== 产品分类映射回归测试 ===\n')
 
-test('当前 live scope 应只包含 4 个真实支持品类', () => {
+test('当前 live scope 应同时包含简单品类与一期复杂包装品类', () => {
   const definitions = getAllLiveProductCategoryDefinitions()
-  assert(definitions.length === 4, 'live scope 应只包含 4 个品类定义')
+  assert(definitions.length === 10, 'live scope 应包含 10 个品类定义')
 })
 
-test('album 应映射到 brochure 分类，其他品类应映射到各自分类', () => {
+test('简单品类和一期复杂包装品类都应映射到各自 canonical 分类', () => {
   assert(getProductCategoryDefinition('album').slug === 'brochure', 'album 应映射到 brochure')
   assert(getProductCategoryDefinition('flyer').slug === 'flyer', 'flyer 应映射到 flyer')
   assert(getProductCategoryDefinition('business_card').slug === 'business-card', 'business_card 应映射到 business-card')
   assert(getProductCategoryDefinition('poster').slug === 'poster', 'poster 应映射到 poster')
+  assert(getProductCategoryDefinition('mailer_box').slug === 'mailer-box', 'mailer_box 应映射到 mailer-box')
+  assert(getProductCategoryDefinition('tuck_end_box').slug === 'tuck-end-box', 'tuck_end_box 应映射到 tuck-end-box')
+  assert(getProductCategoryDefinition('window_box').slug === 'window-box', 'window_box 应映射到 window-box')
 })
 
 test('旧 productCategory 标识应有最小兼容别名，避免历史 slug 继续污染新落库', () => {

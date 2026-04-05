@@ -1,11 +1,18 @@
 import { NextResponse } from 'next/server'
 import { createErrorResponse, withErrorHandler, ErrorCode } from '@/server/api/response'
 import { createReflectionRecord, getConversationWithDetails } from '@/server/db/conversations'
-import { generateReflection, ReflectionIssueType } from '@/server/learning/generateReflection'
+import { buildReflectionContextSummary } from '@/lib/reflection/context'
+import { buildOriginalExtractedParams } from '@/lib/reflection/packagingCorrectedParams'
+import {
+  isReflectionIssueType,
+  REFLECTION_ISSUE_TYPES,
+  type ReflectionIssueType,
+} from '@/lib/reflection/issueTypes'
+import { generateReflection } from '@/server/learning/generateReflection'
 
 export const dynamic = 'force-dynamic'
 
-const ISSUE_TYPES: ReflectionIssueType[] = ['PARAM_MISSING', 'PARAM_WRONG', 'QUOTE_INACCURATE', 'SHOULD_HANDOFF']
+const ISSUE_TYPES: ReflectionIssueType[] = [...REFLECTION_ISSUE_TYPES]
 
 function isObject(value: unknown): value is Record<string, any> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -14,7 +21,36 @@ function isObject(value: unknown): value is Record<string, any> {
 function buildQuoteSummary(quote: any): string {
   if (!quote) return ''
   const total = typeof quote.totalCents === 'number' ? (quote.totalCents / 100).toFixed(2) : '0.00'
-  return `报价#${quote.id} 总价¥${total}`
+  const parameters = isObject(quote.parameters) ? quote.parameters : undefined
+  const pricingDetails = isObject(quote.pricingDetails) ? quote.pricingDetails : undefined
+  const packagingReview = isObject(pricingDetails?.packagingReview) ? pricingDetails.packagingReview : undefined
+  const baseSummary = `报价#${quote.id} 总价¥${total}`
+
+  if (!packagingReview) {
+    return baseSummary
+  }
+
+  const packagingSummary = buildReflectionContextSummary(
+    parameters ? { packagingContext: parameters } : undefined,
+    pricingDetails ? { packagingContext: pricingDetails } : undefined
+  )
+
+  const status = typeof packagingReview.statusLabel === 'string'
+    ? packagingReview.statusLabel
+    : typeof packagingReview.status === 'string'
+      ? packagingReview.status
+      : '复杂包装'
+
+  return [baseSummary, `${status}`, packagingSummary].filter(Boolean).join('；')
+}
+
+function sanitizeQuoteParameters(parameters: unknown): Record<string, any> | undefined {
+  if (!isObject(parameters)) return undefined
+  const sanitized = { ...parameters }
+  delete sanitized.mainItem
+  delete sanitized.subItems
+  delete sanitized.referenceFiles
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined
 }
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
@@ -36,16 +72,16 @@ export async function POST(request: Request, { params }: { params: { id: string 
       return createErrorResponse('会话不存在', ErrorCode.NOT_FOUND, 404)
     }
 
-    const issueType = ISSUE_TYPES.includes(payload.issueType) ? payload.issueType : 'PARAM_WRONG'
+    const issueType = isReflectionIssueType(payload.issueType) && ISSUE_TYPES.includes(payload.issueType)
+      ? payload.issueType
+      : 'PARAM_WRONG'
     const latestAssistantMessage = [...conversation.messages].reverse().find((m) => m.sender === 'ASSISTANT')
     const latestQuote = conversation.quotes?.[0]
 
     const metadata = isObject(latestAssistantMessage?.metadata)
       ? (latestAssistantMessage.metadata as Record<string, any>)
       : undefined
-    const originalExtractedParams = isObject(payload.originalExtractedParams)
-      ? payload.originalExtractedParams
-      : (isObject(metadata?.extractedParams) ? metadata?.extractedParams : undefined)
+    const originalExtractedParams = buildOriginalExtractedParams(payload.originalExtractedParams, metadata, latestQuote)
 
     const correctedParams = isObject(payload.correctedParams) ? payload.correctedParams : undefined
     const originalQuoteSummary = typeof payload.originalQuoteSummary === 'string'

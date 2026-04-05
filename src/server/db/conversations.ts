@@ -1,5 +1,8 @@
+import { Prisma } from '@prisma/client'
 import { prisma } from './prisma'
 import { getProductCategoryLookup } from '@/lib/catalog/productCategoryMapping'
+import { collectReflectionMissingFields } from '@/lib/reflection/context'
+import { type ReflectionIssueType } from '@/lib/reflection/issueTypes'
 
 async function getOrCreateProductCategory(productType: string) {
   const { canonical, legacySlugs, legacyNames } = getProductCategoryLookup(productType)
@@ -151,7 +154,7 @@ export async function createReflectionRecord(params: {
   correctedParams?: Record<string, any>
   originalQuoteSummary?: string
   correctedQuoteSummary?: string
-  issueType: 'PARAM_MISSING' | 'PARAM_WRONG' | 'QUOTE_INACCURATE' | 'SHOULD_HANDOFF'
+  issueType: ReflectionIssueType
   reflectionText: string
   suggestionDraft: string
 }) {
@@ -255,16 +258,47 @@ export async function createQuoteRecord(params: {
   })
 }
 
-export async function listConversations() {
+type ConversationListOptions = {
+  status?: 'OPEN' | 'MISSING_FIELDS' | 'QUOTED' | 'PENDING_HUMAN' | 'CLOSED'
+  updatedAt?: {
+    gte?: Date
+    lt?: Date
+  }
+}
+
+export async function listConversations(options: ConversationListOptions = {}) {
   return prisma.conversation.findMany({
+    where: {
+      ...(options.status ? { status: options.status } : {}),
+      ...(options.updatedAt ? { updatedAt: options.updatedAt } : {}),
+    },
     orderBy: { updatedAt: 'desc' },
     include: {
       messages: {
         orderBy: { createdAt: 'desc' },
-        take: 1,
+        take: 3,
       },
       quotes: {
+        orderBy: { createdAt: 'desc' },
         take: 1,
+      },
+    },
+  })
+}
+
+export async function listConversationsForExport(options: ConversationListOptions = {}) {
+  return prisma.conversation.findMany({
+    where: {
+      ...(options.status ? { status: options.status } : {}),
+      ...(options.updatedAt ? { updatedAt: options.updatedAt } : {}),
+    },
+    orderBy: { updatedAt: 'desc' },
+    include: {
+      messages: {
+        orderBy: { createdAt: 'asc' },
+      },
+      quotes: {
+        orderBy: { createdAt: 'desc' },
       },
     },
   })
@@ -313,12 +347,32 @@ export async function updateReflectionStatus(
   })
 }
 
+export async function updateReflectionRecord(
+  reflectionId: number,
+  updates: {
+    status?: 'NEW' | 'REVIEWED' | 'APPROVED' | 'REJECTED'
+    issueType?: ReflectionIssueType
+    correctedParams?: Record<string, any> | null
+    correctedQuoteSummary?: string | null
+  }
+) {
+  return prisma.reflectionRecord.update({
+    where: { id: reflectionId },
+    data: {
+      status: updates.status,
+      issueType: updates.issueType,
+      correctedParams: updates.correctedParams === null ? Prisma.JsonNull : updates.correctedParams,
+      correctedQuoteSummary: updates.correctedQuoteSummary,
+    },
+  })
+}
+
 export async function getAllReflections(
   limit: number = 50,
   offset: number = 0,
   filters?: {
     status?: 'NEW' | 'REVIEWED' | 'APPROVED' | 'REJECTED'
-    issueType?: 'PARAM_MISSING' | 'PARAM_WRONG' | 'QUOTE_INACCURATE' | 'SHOULD_HANDOFF'
+    issueType?: ReflectionIssueType
   }
 ) {
   const where = {
@@ -370,7 +424,7 @@ export async function getReflectionStats() {
   // Get most common missing fields
   const reflectionsWithMissing = await prisma.reflectionRecord.findMany({
     where: {
-      issueType: 'PARAM_MISSING',
+      issueType: { in: ['PARAM_MISSING', 'PACKAGING_PARAM_MISSING'] },
       createdAt: { gte: sevenDaysAgo },
     },
     select: {
@@ -381,18 +435,18 @@ export async function getReflectionStats() {
 
   const missingFieldsCount: Record<string, number> = {}
   reflectionsWithMissing.forEach((r) => {
-    if (r.correctedParams && typeof r.correctedParams === 'object') {
-      const corrected = r.correctedParams as Record<string, any>
-      Object.keys(corrected).forEach((key) => {
-        missingFieldsCount[key] = (missingFieldsCount[key] || 0) + 1
-      })
-    }
+    collectReflectionMissingFields(
+      r.originalExtractedParams as Record<string, any> | null,
+      r.correctedParams as Record<string, any> | null
+    ).forEach((field) => {
+      missingFieldsCount[field] = (missingFieldsCount[field] || 0) + 1
+    })
   })
 
   // Get handoff reasons (SHOULD_HANDOFF type)
   const handoffReflections = await prisma.reflectionRecord.findMany({
     where: {
-      issueType: 'SHOULD_HANDOFF',
+      issueType: { in: ['SHOULD_HANDOFF', 'SHOULD_HANDOFF_BUT_NOT'] },
       createdAt: { gte: sevenDaysAgo },
     },
     select: {

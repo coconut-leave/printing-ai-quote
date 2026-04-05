@@ -1,4 +1,5 @@
 import { buildHomeDemoViewModel } from '@/app/homeDemoView'
+import { HOME_EXAMPLE_GROUPS } from '@/app/homeExamplePrompts'
 
 interface TestResult {
   name: string
@@ -106,6 +107,20 @@ test('明确要求报价后进入 quoted', () => {
 
   assert(viewModel.statusText === '已生成正式报价', '应显示 quoted 状态')
   assert(viewModel.quoteKindText === '正式报价', '应标识正式报价')
+})
+
+test('首页示例应按四类测试入口分组', () => {
+  assert(HOME_EXAMPLE_GROUPS.length === 4, '首页示例应稳定保持四类入口')
+  assert(HOME_EXAMPLE_GROUPS.map((group) => group.title).join(' / ') === '推荐案例 / 正式报价 / 参考报价 / 转人工', '首页示例标题应清晰对应四类会话入口')
+})
+
+test('首页示例文案应覆盖推荐 报价 预报价 和人工核价场景', () => {
+  const flattenedPrompts = HOME_EXAMPLE_GROUPS.flatMap((group) => group.prompts)
+
+  assert(flattenedPrompts.includes('我想做一个纸盒装护肤品，你们一般推荐什么'), '应保留推荐案例示例')
+  assert(flattenedPrompts.includes('飞机盒，20*12*6cm，300克白卡，四色印刷，5000个'), '应保留正式报价示例')
+  assert(flattenedPrompts.includes('开窗彩盒，21*17*31cm，400克单铜，印四色，过光胶，500个'), '应保留参考报价示例')
+  assert(flattenedPrompts.includes('请按PDF设计稿来报价'), '应保留转人工示例')
 })
 
 console.log('\n=== 测试总结 ===\n')

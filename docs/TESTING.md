@@ -1,6 +1,6 @@
 # MVP 测试与验证指南
 
-本指南说明如何对 MVP 进行回归测试、手工验证和问题排查。
+本指南说明如何对 MVP 进行回归测试、手工验证和问题排查，覆盖简单品类正式报价，以及复杂包装一期的结构化预报价与人工复核边界。
 
 ---
 
@@ -69,7 +69,7 @@ npm run dev
 
 ### 阶段 2：手工测试
 
-参考 [📋 docs/test-cases.md](docs/test-cases.md) 中的 10 个测试用例，逐个验证 MVP 功能。
+参考 [📋 docs/test-cases.md](docs/test-cases.md) 中的 16 个测试用例，逐个验证 MVP 功能。
 
 快速验证脚本（使用 curl）：
 
@@ -100,17 +100,44 @@ curl -X POST http://localhost:3007/api/chat \
   }' | jq .
 ```
 
-#### 测试 4: 会话列表页
+#### 测试 4: 飞机盒结构化预报价
+```bash
+curl -X POST http://localhost:3007/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "飞机盒报价，长20宽12高6cm，E坑，300g白卡，单面彩印，5000个"
+  }' | jq .
+```
+
+#### 测试 5: 主盒 + 内托 + 说明书 + 贴纸组合报价
+```bash
+curl -X POST http://localhost:3007/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "主盒 + 内托 + 说明书 + 透明封口贴一起预报价，主盒18x12x6cm，内托白卡，说明书A5，贴纸3x3cm"
+  }' | jq .
+```
+
+#### 测试 6: 刀模 PDF 进入人工复核
+```bash
+curl -X POST http://localhost:3007/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "我上传了飞机盒刀模 PDF，按这个文件先预报价"
+  }' | jq .
+```
+
+#### 测试 7: 会话列表页
 ```
 http://localhost:3007/conversations
 ```
 
-#### 测试 5: 会话详情页（替换 1 为实际 conversationId）
+#### 测试 8: 会话详情页（替换 1 为实际 conversationId）
 ```
 http://localhost:3007/conversations/1
 ```
 
-#### 测试 6: 报价单导出（替换 1 为实际 quoteId）
+#### 测试 9: 报价单导出（替换 1 为实际 quoteId）
 ```
 http://localhost:3007/api/quotes/1/export
 ```
@@ -167,6 +194,18 @@ npm run test:ai
 - 数据库持久层（假设 Prisma 自测满足）
 - 端到端集成（建议后期补充）
 - UI 交互逻辑（依靠手工浏览器测试）
+- 刀模 PDF 的稳定自动结构解析
+- 复杂包装的全自动最终报价
+
+---
+
+## 复杂包装一期手工验证边界
+
+- 复杂包装一期以结构化预报价 + 人工复核为主
+- 推荐场景包括：`mailer_box`、`tuck_end_box`、`window_box`、`leaflet_insert`、`box_insert`、`seal_sticker`
+- 组合报价场景建议至少验证一次主件 + 子组件表达
+- 当用户提供 PDF / AI / CDR / 刀模文件时，预期行为应是人工复核，不是稳定自动报价
+- PDF 作为知识资料或样例资料时，可以用于说明，但当前阶段不承诺稳定自动结构解析
 
 ---
 

@@ -15,6 +15,7 @@ type ConversationSnapshot = {
 export type IntentBusinessResult = {
   status: 'progress_inquiry' | 'sample_request' | 'bargain_request' | 'intent_only'
   reply: string
+  conversationAction?: 'view_existing_quote'
   recommendedParams?: {
     productType?: string
     recommendedParams: Record<string, any>
@@ -54,21 +55,22 @@ export function buildProgressInquiryReply(conversation?: ConversationSnapshot | 
   if (!conversation) {
     return {
       status: 'progress_inquiry',
-      reply: '当前还没有可查询的历史会话记录。您可以直接发送产品、尺寸、数量等信息，我先帮您进入报价流程。',
+      reply: '这边还没有查到可跟进的历史询价。您直接把产品、尺寸、数量这些信息发我，我就能继续帮您往下看。',
     }
   }
 
   if (conversation.status === 'PENDING_HUMAN' || conversation.handoffs?.some((item) => !item.resolved)) {
     return {
       status: 'progress_inquiry',
-      reply: '当前询价已转人工处理，人工团队正在继续核价或跟进，请稍候查看会话详情或等待人工回复。',
+      reply: '这单已经转给人工同事继续跟进了，正在核价或确认细节。您把补充信息继续发在这里就行，人工会接着看。',
     }
   }
 
   if (conversation.status === 'QUOTED' || (conversation.quotes?.length || 0) > 0) {
     return {
       status: 'progress_inquiry',
-      reply: '当前已生成报价，您可以查看当前会话详情；如果需要对外发送，也可以使用报价单导出入口。如需调整规格，我也可以继续按新要求重新报价。',
+      reply: '这边已经有报价结果了，您可以查看当前会话详情；如果需要对外发送，也可以走报价单导出入口。要是规格还想调整，我也可以继续按新要求帮您重算。',
+      conversationAction: 'view_existing_quote',
     }
   }
 
@@ -77,21 +79,21 @@ export function buildProgressInquiryReply(conversation?: ConversationSnapshot | 
     return {
       status: 'progress_inquiry',
       reply: missingFieldsText
-        ? `当前还缺少这些参数：${missingFieldsText}，暂未生成正式报价。您可以直接继续补充这些规格，我会接着完成报价。`
-        : '当前还缺少部分参数，暂未生成正式报价。请继续补充关键规格后，我会继续完成报价。',
+        ? `这边还差这些参数：${missingFieldsText}，所以暂时还没收成正式报价。您直接把这些规格补给我，我就接着往下算。`
+        : '这边还差几项关键规格，所以暂时还没收成正式报价。您继续补充一下，我就接着往下算。',
     }
   }
 
   return {
     status: 'progress_inquiry',
-    reply: '当前询价正在处理中，尚未生成正式报价。如果您还有尺寸、数量、纸张或工艺信息，也可以继续补充，以加快报价进度。',
+    reply: '这边还在整理这单的报价信息，暂时还没出正式结果。要是您还有尺寸、数量、纸张或工艺信息，继续发我就行，我直接接着补。',
   }
 }
 
 export function buildSampleRequestReply(): IntentBusinessResult {
   return {
     status: 'sample_request',
-    reply: '已识别为打样或样品咨询。当前 MVP 可先记录您的样品需求，您可以继续补充产品类型、尺寸、数量和打样目的；如需更快确认，也可直接联系人工继续处理。',
+    reply: '可以先帮您记成打样或样品需求。您把产品类型、尺寸、数量和打样目的发我，我先帮您整理；如果想更快推进，也可以直接转人工。',
   }
 }
 
@@ -109,8 +111,8 @@ export function buildBargainRequestReply(message: string, conversation?: Convers
     return {
       status: 'bargain_request',
       reply: recommendationPayload
-        ? `当前还缺少关键参数，暂不适合直接比较最终价格。先给您一个更省成本的常见参考方案：${knowledgeCard?.shortAnswer} 如果您认可，我可以继续按这个方案补齐参数并估价。`
-        : '当前还缺少关键参数，暂不适合直接比较更经济方案。您先补齐尺寸、数量、纸张或工艺后，我可以按更常见、更省成本的配置给您提供参考价。',
+        ? `现在还差关键参数，先比最终价意义不大。要不我先给您一版更省成本的常见做法：${knowledgeCard?.shortAnswer} 您觉得方向可以的话，我就按这版继续补参和估价。`
+        : '现在还差关键参数，先比最终价意义不大。您把尺寸、数量、纸张或工艺补齐后，我可以按更常见、也更省成本的配置再给您一版参考价。',
       recommendedParams: recommendationPayload,
     }
   }
@@ -119,8 +121,8 @@ export function buildBargainRequestReply(message: string, conversation?: Convers
     return {
       status: 'bargain_request',
       reply: recommendationPayload
-        ? `当前正式报价不会直接修改，也不会自动给出折扣。如果您更想控成本，可以先参考这个更贴合预算的常见方案：${knowledgeCard?.shortAnswer} 如果需要，我也可以按这个方案继续估价。`
-        : '当前正式报价不会直接修改，也不会自动给出折扣。如果您希望控制成本，我可以按更常见或更经济的方案重新给您提供参考价，例如调整纸张、克重、单双面或工艺。',
+        ? `正式报价这边不会直接改价，也不会自动给折扣。不过如果您想把成本压下来，可以先参考这版更贴预算的常见方案：${knowledgeCard?.shortAnswer} 如果您要，我也可以按这版继续帮您估。`
+        : '正式报价这边不会直接改价，也不会自动给折扣。不过如果您想控制成本，我可以按更常见或更经济的方案重新给您一版参考价，比如调整纸张、克重、单双面或工艺。',
       recommendedParams: recommendationPayload,
     }
   }
@@ -128,8 +130,8 @@ export function buildBargainRequestReply(message: string, conversation?: Convers
   return {
     status: 'bargain_request',
     reply: recommendationPayload
-      ? `可以的。按您现在提到的用途和预算倾向，先给您一个更贴合的常见方案：${knowledgeCard?.shortAnswer} 如果您认可，我也可以按这个方案继续估价。`
-      : '可以的。当前不会直接改正式报价，但我可以按更常见或更经济的方案先给您参考价。您可以继续告诉我产品、尺寸、数量，或说明想优先压缩哪部分成本。',
+      ? `可以的。按您现在提到的用途和预算倾向，我先给您一版更贴合、也更省一点的常见方案：${knowledgeCard?.shortAnswer} 如果您觉得可以，我就按这版继续往下估。`
+      : '可以的。我这边可以先按更常见或更经济的方案给您做参考。您继续告诉我产品、尺寸、数量，或者说明您最想压缩哪部分成本就行。',
     recommendedParams: recommendationPayload,
   }
 }
@@ -137,7 +139,7 @@ export function buildBargainRequestReply(message: string, conversation?: Convers
 export function buildUnknownIntentReply(): IntentBusinessResult {
   return {
     status: 'intent_only',
-    reply: '已收到您的消息。您可以直接告诉我产品、尺寸和数量；如果需要人工协助，也可以直接说“转人工”。',
+    reply: '收到。您可以直接告诉我产品、尺寸、数量，或者把想做的效果发我，我来帮您往报价方向收。需要人工的话也可以直接说“转人工”。',
   }
 }
 

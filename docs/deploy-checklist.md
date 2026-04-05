@@ -35,11 +35,16 @@
 - [ ] 未授权访问 `/api/quotes/[id]/export` 返回 401
 - [ ] 已授权后可访问 `/dashboard`、`/conversations`、`/learning-dashboard`
 - [ ] 已授权后可访问会话详情中的报价单导出链接
-- [ ] 画册 / 传单 / 名片 / 海报四类 live scope 询价至少各验证 1 条
+- [ ] 画册 / 传单 / 名片 / 海报四类简单品类主链路询价至少各验证 1 条
+- [ ] 复杂包装一期至少验证 1 条飞机盒或双插盒预报价场景
+- [ ] 至少验证 1 条开窗彩盒或组合报价场景
+- [ ] 至少验证 1 条 PDF / 刀模文件进入人工复核的场景
 - [ ] 至少抽查 1 条新 Quote，确认 productCategory 落库使用 canonical 分类：`brochure` / `flyer` / `business-card` / `poster`
 - [ ] `bash scripts/admin-access-smoke.sh` 至少跑通一次，且在状态不符合预期时会直接失败
 - [ ] Dashboard 至少确认以下 4 组指标有值且口径正常：`quoted`、`missing_fields`、`handoff_required`、`consultation → recommendation_confirmation / quoted`
 - [ ] Learning Dashboard、改进建议池、建议落地工作台能打开，但团队需明确其 improvement/action 状态是演示态，不作为正式长期台账
+- [ ] 发布说明中没有把复杂包装写成“已完全自动化报价”
+- [ ] 发布说明中明确区分 PDF 作为知识资料与 PDF 作为客户设计附件或刀模文件
 
 ## 已知构建说明
 

@@ -1,4 +1,9 @@
 import {
+  buildReflectionContextSummary,
+} from '@/lib/reflection/context'
+import { buildImprovementActionDraft } from './improvementActionDraft'
+import { buildPackagingImprovementAttribution } from './packagingImprovementSuggestion'
+import {
   classifyImprovementType,
   deriveImpactArea,
   generateImplementationHint,
@@ -34,20 +39,43 @@ function toDate(value: Date | string): Date {
 
 export function buildImprovementSuggestion(reflection: ReflectionForImprovement): ImprovementSuggestion {
   const createdAt = toDate(reflection.createdAt)
-  const suggestionType = classifyImprovementType(
+  const packagingAttribution = buildPackagingImprovementAttribution({
+    issueType: reflection.issueType,
+    originalExtractedParams: reflection.originalExtractedParams,
+    correctedParams: reflection.correctedParams,
+  })
+  const effectiveSuggestionDraft = packagingAttribution?.suggestionDraft || reflection.suggestionDraft
+  const suggestionType = packagingAttribution?.suggestionType || classifyImprovementType(
     reflection.issueType,
-    reflection.suggestionDraft,
+    effectiveSuggestionDraft,
     reflection.correctedParams || undefined
   )
-  const hint = generateImplementationHint(suggestionType, reflection.suggestionDraft)
-  const impactArea = deriveImpactArea({
+  const hint = generateImplementationHint(reflection.issueType, suggestionType, effectiveSuggestionDraft)
+  const impactArea = packagingAttribution?.impactArea || deriveImpactArea({
     issueType: reflection.issueType,
     suggestionType,
     targetArea: hint.targetArea,
-    suggestionDraft: reflection.suggestionDraft,
+    suggestionDraft: effectiveSuggestionDraft,
+    correctedParams: reflection.correctedParams || undefined,
+  })
+  const actionDraft = buildImprovementActionDraft({
+    issueType: reflection.issueType,
+    suggestionType,
+    targetArea: hint.targetArea,
+    targetFileHint: packagingAttribution?.targetFileHint || hint.targetFileHint,
+    title: packagingAttribution?.title || generateTitle(reflection.issueType, suggestionType, effectiveSuggestionDraft),
+    suggestionDraft: effectiveSuggestionDraft,
+    issueSummary: packagingAttribution?.issueSummary,
+    diffCategory: packagingAttribution?.diffCategory,
+    whyItHappened: packagingAttribution?.whyItHappened,
+    suggestedActionHint: packagingAttribution?.suggestedActionHint,
     correctedParams: reflection.correctedParams || undefined,
   })
   const improvementId = generateImprovementId(reflection.id, createdAt)
+  const contextSummary = buildReflectionContextSummary(
+    reflection.originalExtractedParams || undefined,
+    reflection.correctedParams || undefined
+  )
 
   return {
     id: improvementId,
@@ -56,17 +84,24 @@ export function buildImprovementSuggestion(reflection: ReflectionForImprovement)
     conversationId: reflection.conversationId,
     issueType: reflection.issueType,
     suggestionType,
-    targetArea: hint.targetArea,
+    targetArea: actionDraft?.targetArea || hint.targetArea,
     impactArea,
-    targetFileHint: getImprovementTargetFileHint(improvementId) || hint.targetFileHint,
-    implementationNote: getImprovementNote(improvementId) || hint.implementationNote,
+    targetFileHint: getImprovementTargetFileHint(improvementId) || actionDraft?.targetFileHint || packagingAttribution?.targetFileHint || hint.targetFileHint,
+    implementationNote: getImprovementNote(improvementId) || actionDraft?.implementationNote || packagingAttribution?.suggestedActionHint || hint.implementationNote,
     implementationSummary: getImprovementSummary(improvementId),
     verificationNote: getImprovementVerificationNote(improvementId),
-    title: generateTitle(reflection.issueType, suggestionType, reflection.suggestionDraft),
-    summary: generateSummary(reflection.suggestionDraft),
-    suggestionDraft: reflection.suggestionDraft,
+    title: packagingAttribution?.title || generateTitle(reflection.issueType, suggestionType, effectiveSuggestionDraft),
+    summary: packagingAttribution?.summary || generateSummary(effectiveSuggestionDraft),
+    suggestionDraft: effectiveSuggestionDraft,
+    actionDraft,
+    issueSummary: packagingAttribution?.issueSummary,
+    diffCategory: packagingAttribution?.diffCategory,
+    confidence: packagingAttribution?.confidence,
+    whyItHappened: packagingAttribution?.whyItHappened,
+    suggestedActionHint: packagingAttribution?.suggestedActionHint,
     originalExtractedParams: reflection.originalExtractedParams || undefined,
     correctedParams: reflection.correctedParams || undefined,
+    contextSummary: contextSummary || undefined,
     status: getImprovementStatus(improvementId),
     createdAt,
     lastActionAt: getImprovementLastActionAt(improvementId),
