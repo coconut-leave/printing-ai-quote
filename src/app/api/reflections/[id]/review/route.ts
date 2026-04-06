@@ -1,4 +1,9 @@
 import { NextResponse } from 'next/server'
+import {
+  buildReflectionBusinessCorrectedParams,
+  buildReflectionBusinessFeedbackSummary,
+  normalizeReflectionBusinessFeedback,
+} from '@/lib/reflection/businessFeedback'
 import { updateReflectionRecord } from '@/server/db/conversations'
 import { prisma } from '@/server/db/prisma'
 import { isReflectionIssueType } from '@/lib/reflection/issueTypes'
@@ -18,7 +23,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     }
 
     const body = await request.json()
-    const { status, issueType, correctedParams, correctedQuoteSummary } = body
+    const { status, issueType, correctedParams, correctedQuoteSummary, businessFeedback } = body
 
     const validStatuses = ['NEW', 'REVIEWED', 'APPROVED', 'REJECTED']
     if (status !== undefined && !validStatuses.includes(status)) {
@@ -49,11 +54,14 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       )
     }
 
+    const normalizedBusinessFeedback = normalizeReflectionBusinessFeedback(businessFeedback)
+
     if (
       status === undefined
       && issueType === undefined
       && correctedParams === undefined
       && correctedQuoteSummary === undefined
+      && businessFeedback === undefined
     ) {
       return NextResponse.json(
         { ok: false, error: 'No editable fields provided' },
@@ -76,8 +84,13 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const updated = await updateReflectionRecord(reflectionId, {
       status: status as 'NEW' | 'REVIEWED' | 'APPROVED' | 'REJECTED' | undefined,
       issueType,
-      correctedParams,
-      correctedQuoteSummary,
+      correctedParams: buildReflectionBusinessCorrectedParams({
+        correctedParams: isObject(correctedParams) ? correctedParams : reflection.correctedParams as Record<string, any> | null,
+        businessFeedback: normalizedBusinessFeedback,
+      }),
+      correctedQuoteSummary: correctedQuoteSummary === undefined
+        ? (normalizedBusinessFeedback?.correctResult || buildReflectionBusinessFeedbackSummary(normalizedBusinessFeedback) || undefined)
+        : correctedQuoteSummary,
     })
 
     return NextResponse.json({

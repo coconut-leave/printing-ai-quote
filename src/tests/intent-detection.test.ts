@@ -34,6 +34,21 @@ test('QUOTE_REQUEST: 标准报价询问', () => {
   assert(result.intent === 'QUOTE_REQUEST', '应识别为 QUOTE_REQUEST')
 })
 
+test('UNKNOWN: 纯数字串不应进入报价意图', () => {
+  const result = detectIntent({ message: '111222' })
+  assert(result.intent === 'UNKNOWN', '纯数字串应识别为 UNKNOWN')
+})
+
+test('UNKNOWN: 无意义中文文本不应进入报价意图', () => {
+  const result = detectIntent({ message: '男男女女男男女女' })
+  assert(result.intent === 'UNKNOWN', '无意义中文文本应识别为 UNKNOWN')
+})
+
+test('UNKNOWN: 无法稳定映射业务语义的文本不应进入报价意图', () => {
+  const result = detectIntent({ message: '挖洞啊文件哦大危机大宋' })
+  assert(result.intent === 'UNKNOWN', '无法稳定映射业务语义的文本应识别为 UNKNOWN')
+})
+
 test('PARAM_SUPPLEMENT: 缺参会话中的补参消息', () => {
   const result = detectIntent({
     message: '32页，157g铜版纸，骑马钉',

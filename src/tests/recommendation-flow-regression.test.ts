@@ -190,7 +190,7 @@ async function main() {
     assert(patch.mergedRecommendedParams.bindingType === 'perfect_bind', '应叠加当前装订 patch')
   })
 
-  await test('estimated: 明确报价后进入参考报价链路', async () => {
+  await test('handoff_required: 简单印刷品推荐后确认参考价时应转人工，并保留 patch 结果', async () => {
     const conversation = await createConversationForTest!()
     await addMessageForTest!(conversation.id, 'CUSTOMER', '传单常见方案是什么？')
     await addMessageForTest!(
@@ -221,11 +221,11 @@ async function main() {
     })
 
     assert(quote.intent === 'RECOMMENDATION_CONFIRMATION', 'intent 应为 RECOMMENDATION_CONFIRMATION')
-    assert(quote.status === 'estimated', 'status 应为 estimated')
+    assert(quote.status === 'handoff_required', 'status 应为 handoff_required')
     assert(quote.mergedParams.finishedSize === 'A3', '最终应保留 patch 后尺寸')
   })
 
-  await test('quoted: 明确报价后进入正式报价链路', async () => {
+  await test('handoff_required: 简单印刷品推荐后确认正式报价时应转人工，并保留 patch 结果', async () => {
     const consultation = await sendChat!({
       message: 'A4画册一般多少页比较合适？',
     })
@@ -241,7 +241,7 @@ async function main() {
     })
 
     assert(quote.intent === 'RECOMMENDATION_CONFIRMATION', 'intent 应为 RECOMMENDATION_CONFIRMATION')
-    assert(quote.status === 'quoted', 'status 应为 quoted')
+    assert(quote.status === 'handoff_required', 'status 应为 handoff_required')
     assert(quote.mergedParams.pageCount === 40, '最终正式报价应使用 patch 后页数')
   })
 
@@ -259,7 +259,7 @@ async function main() {
     assert(handoff.status === 'handoff_required', 'status 应为 handoff_required')
   })
 
-  await test('patch 失败时不破坏主链路', async () => {
+  await test('patch 失败时不破坏推荐后转人工主链路', async () => {
     const consultation = await sendChat!({
       message: 'A4画册一般多少页比较合适？',
     })
@@ -277,7 +277,7 @@ async function main() {
     })
 
     assert(quote.intent === 'RECOMMENDATION_CONFIRMATION', '后续仍应识别为 RECOMMENDATION_CONFIRMATION')
-    assert(quote.status === 'quoted', 'patch 失败后不应破坏正式报价主链路')
+    assert(quote.status === 'handoff_required', 'patch 失败后不应破坏推荐后转人工主链路')
     assert(quote.mergedParams.pageCount === 32, '仍应使用最近有效推荐方案')
   })
 

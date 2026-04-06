@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server'
 import { createErrorResponse, withErrorHandler, ErrorCode } from '@/server/api/response'
 import { createReflectionRecord, getConversationWithDetails } from '@/server/db/conversations'
+import {
+  buildReflectionBusinessCorrectedParams,
+  buildReflectionBusinessFeedbackSummary,
+  normalizeReflectionBusinessFeedback,
+} from '@/lib/reflection/businessFeedback'
 import { buildReflectionContextSummary } from '@/lib/reflection/context'
 import { buildOriginalExtractedParams } from '@/lib/reflection/packagingCorrectedParams'
 import {
@@ -83,13 +88,19 @@ export async function POST(request: Request, { params }: { params: { id: string 
       : undefined
     const originalExtractedParams = buildOriginalExtractedParams(payload.originalExtractedParams, metadata, latestQuote)
 
-    const correctedParams = isObject(payload.correctedParams) ? payload.correctedParams : undefined
+    const businessFeedback = normalizeReflectionBusinessFeedback(payload.businessFeedback)
+    const correctedParams = buildReflectionBusinessCorrectedParams({
+      correctedParams: isObject(payload.correctedParams) ? payload.correctedParams : undefined,
+      businessFeedback,
+    })
     const originalQuoteSummary = typeof payload.originalQuoteSummary === 'string'
       ? payload.originalQuoteSummary
       : buildQuoteSummary(latestQuote)
     const correctedQuoteSummary = typeof payload.correctedQuoteSummary === 'string'
       ? payload.correctedQuoteSummary
-      : undefined
+      : businessFeedback?.correctResult
+        || buildReflectionBusinessFeedbackSummary(businessFeedback)
+        || undefined
     const quoteId = typeof payload.quoteId === 'number' ? payload.quoteId : latestQuote?.id
 
     const generated = await generateReflection({
@@ -99,6 +110,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
       correctedParams,
       originalQuoteSummary,
       correctedQuoteSummary,
+      businessFeedback,
     })
 
     const reflection = await createReflectionRecord({

@@ -3,6 +3,12 @@ import { ACTIVE_AUTO_QUOTE_PRODUCT_TYPES, isActiveAutoQuoteProductType } from '@
 import { buildImprovementSuggestions, type ReflectionForImprovement } from '@/server/learning/improvementView'
 import { collectReflectionMissingFields } from '@/lib/reflection/context'
 import { isMissingFieldReflectionIssueType } from '@/lib/reflection/issueTypes'
+import {
+  buildClarificationTrackingStats,
+  type ClarificationOverview,
+  type ClarificationReasonBreakdownRow,
+  type ClarificationResolvedBreakdownRow,
+} from '@/server/analytics/clarificationTracking'
 
 export type DashboardPeriod = 'today' | '7d' | '30d'
 
@@ -61,6 +67,9 @@ type BaseDashboardStats = {
   }
   consultationFunnel: FunnelOverview
   consultationFunnelTrend: TrendDelta<FunnelOverview>
+  clarificationOverview: ClarificationOverview
+  clarificationReasonBreakdown: ClarificationReasonBreakdownRow[]
+  clarificationResolvedBreakdown: ClarificationResolvedBreakdownRow[]
   productTypeBreakdown: ProductTypeBreakdownRow[]
   nonActiveProductTypeBreakdown: ProductTypeBreakdownRow[]
   activeAutoQuoteProductTypes: string[]
@@ -383,6 +392,11 @@ function buildBaseDashboardStats(params: {
   const filteredReflections = params.reflections.filter((item) => isWithinRange(item.createdAt, params.startAt, params.endAt))
   const filteredApprovedReflections = params.approvedReflections.filter((item) => isWithinRange(item.createdAt, params.startAt, params.endAt))
   const improvements = buildImprovementSuggestions(params.approvedReflections)
+  const clarificationTracking = buildClarificationTrackingStats({
+    conversations: params.conversations,
+    startAt: params.startAt,
+    endAt: params.endAt,
+  })
 
   const learningOverview: LearningOverview = {
     reflectionCount: filteredReflections.length,
@@ -434,6 +448,9 @@ function buildBaseDashboardStats(params: {
       estimatedCount: 0,
       quotedCount: 0,
     }),
+    clarificationOverview: clarificationTracking.clarificationOverview,
+    clarificationReasonBreakdown: clarificationTracking.clarificationReasonBreakdown,
+    clarificationResolvedBreakdown: clarificationTracking.clarificationResolvedBreakdown,
     productTypeBreakdown: activeProductTypeBreakdown,
     nonActiveProductTypeBreakdown,
     activeAutoQuoteProductTypes: [...ACTIVE_AUTO_QUOTE_PRODUCT_TYPES],

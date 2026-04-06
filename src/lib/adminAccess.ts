@@ -23,6 +23,12 @@ export const PROTECTED_ADMIN_API_PREFIXES = [
 
 const DEFAULT_ADMIN_REDIRECT_PATH = '/dashboard'
 
+type AdminAccessPageMessageParams = {
+  error?: string | null
+  message?: string | null
+  sessionActive?: boolean
+}
+
 export function getAdminSecretFromEnv(): string | null {
   const secret = process.env.ADMIN_SECRET?.trim()
   return secret ? secret : null
@@ -54,6 +60,38 @@ export function buildAdminRedirectTarget(nextPath?: string | null): string {
   }
 
   return nextPath
+}
+
+export function getAdminAccessPageErrorMessage(params: AdminAccessPageMessageParams): string | null {
+  if (params.sessionActive && params.error === 'unauthorized') {
+    return null
+  }
+
+  if (params.error === 'unauthorized') {
+    return '当前还没有后台访问会话，请输入 ADMIN_SECRET 进入后台。'
+  }
+
+  if (params.error === 'missing_secret') {
+    return '当前环境没有配置 ADMIN_SECRET，生产环境下后台页和管理 API 会保持关闭。'
+  }
+
+  if (params.error === 'invalid_secret') {
+    return '输入的 ADMIN_SECRET 不正确，请重新输入。'
+  }
+
+  return null
+}
+
+export function getAdminAccessPageInfoMessage(params: AdminAccessPageMessageParams): string | null {
+  if (params.message === 'logged_out') {
+    return '后台访问会话已清除。'
+  }
+
+  if (params.sessionActive) {
+    return '已登录后台。当前授权会话有效，可直接进入 dashboard 或 conversations。'
+  }
+
+  return null
 }
 
 export function getMissingAdminSecretMessage(): string {

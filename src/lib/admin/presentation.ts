@@ -1,5 +1,6 @@
 import { getMissingFieldsChineseText, isSimpleProductType } from '@/lib/catalog/helpers'
 import { isActiveAutoQuoteProductType } from '@/lib/catalog/productSchemas'
+import type { ClarificationReason, ClarificationResolvedTo } from '@/lib/chat/clarification'
 
 type JsonRecord = Record<string, any>
 
@@ -173,6 +174,31 @@ export function getConversationStatusLabel(status: string): string {
   }
 
   return map[status] || status
+}
+
+export function getClarificationReasonLabel(reason: ClarificationReason): string {
+  const map: Record<ClarificationReason, string> = {
+    noisy_input: '噪声输入',
+    unstable_intent: '意图不稳定',
+    blocked_context_reuse: '阻止沿用旧报价',
+    other: '其他原因',
+  }
+
+  return map[reason] || '其他原因'
+}
+
+export function getClarificationResolvedToLabel(resolvedTo: ClarificationResolvedTo): string {
+  const map: Record<ClarificationResolvedTo, string> = {
+    recommendation: '恢复为推荐方案',
+    missing_fields: '恢复为待补参数',
+    estimated: '恢复为参考报价',
+    quoted: '恢复为正式报价',
+    handoff_required: '转人工',
+    no_followup: '无后续消息',
+    other: '其他结果',
+  }
+
+  return map[resolvedTo] || '其他结果'
 }
 
 export function getReflectionRecordStatusLabel(status: string): string {

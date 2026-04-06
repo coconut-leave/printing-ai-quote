@@ -3,7 +3,11 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { AdminPageNav } from '@/components/AdminPageNav'
-import { getProductTypeDisplayName } from '@/lib/admin/presentation'
+import {
+  getClarificationReasonLabel,
+  getClarificationResolvedToLabel,
+  getProductTypeDisplayName,
+} from '@/lib/admin/presentation'
 
 type DashboardResponse = {
   period: {
@@ -50,6 +54,27 @@ type DashboardResponse = {
     estimatedCountDelta: number
     quotedCountDelta: number
   }
+  clarificationOverview: {
+    clarificationTriggerCount: number
+    clarificationConversationCount: number
+    recoveredConversationCount: number
+    handoffConversationCount: number
+    noFollowupConversationCount: number
+    recoveryRate: number
+    handoffRate: number
+  }
+  clarificationReasonBreakdown: Array<{
+    reason: 'noisy_input' | 'unstable_intent' | 'blocked_context_reuse' | 'other'
+    triggerCount: number
+    recoveredCount: number
+    handoffCount: number
+    noFollowupCount: number
+    recoveryRate: number
+  }>
+  clarificationResolvedBreakdown: Array<{
+    resolvedTo: 'recommendation' | 'missing_fields' | 'estimated' | 'quoted' | 'handoff_required' | 'no_followup' | 'other'
+    count: number
+  }>
   productTypeBreakdown: Array<{
     productType: string
     quotedCount: number
@@ -234,6 +259,105 @@ export default function DashboardPage() {
                 <div className="rounded-lg bg-white p-4 shadow"><div className="text-sm text-gray-600">参考报价</div><div className="mt-1 text-2xl font-bold text-gray-900">{stats.quotePathOverview.estimatedCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.quotePathTrend.estimatedCountDelta)}</div></div>
                 <div className="rounded-lg bg-white p-4 shadow"><div className="text-sm text-gray-600">待补参数</div><div className="mt-1 text-2xl font-bold text-gray-900">{stats.quotePathOverview.missingFieldsCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.quotePathTrend.missingFieldsCountDelta)}</div></div>
                 <div className="rounded-lg bg-white p-4 shadow"><div className="text-sm text-gray-600">人工复核</div><div className="mt-1 text-2xl font-bold text-gray-900">{stats.quotePathOverview.handoffRequiredCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.quotePathTrend.handoffRequiredCountDelta)}</div></div>
+              </div>
+            </div>
+
+            <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+              <div className="rounded-lg bg-white p-6 shadow">
+                <div className="mb-4 flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">澄清与恢复</h2>
+                    <p className="mt-1 text-sm text-gray-500">观察异常输入被拦住之后，用户是否继续补成有效业务路径。</p>
+                  </div>
+                  <div className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
+                    触发 {stats.clarificationOverview.clarificationTriggerCount} 次
+                  </div>
+                </div>
+
+                <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded border border-gray-100 p-4 text-sm">
+                    <div className="text-gray-600">澄清触发会话</div>
+                    <div className="mt-1 text-2xl font-bold text-gray-900">{stats.clarificationOverview.clarificationConversationCount}</div>
+                  </div>
+                  <div className="rounded border border-gray-100 p-4 text-sm">
+                    <div className="text-gray-600">澄清后恢复成功</div>
+                    <div className="mt-1 text-2xl font-bold text-gray-900">{stats.clarificationOverview.recoveredConversationCount}</div>
+                    <div className="mt-1 text-xs text-gray-500">恢复率 {stats.clarificationOverview.recoveryRate}%</div>
+                  </div>
+                  <div className="rounded border border-gray-100 p-4 text-sm">
+                    <div className="text-gray-600">澄清后转人工</div>
+                    <div className="mt-1 text-2xl font-bold text-gray-900">{stats.clarificationOverview.handoffConversationCount}</div>
+                    <div className="mt-1 text-xs text-gray-500">转人工率 {stats.clarificationOverview.handoffRate}%</div>
+                  </div>
+                  <div className="rounded border border-gray-100 p-4 text-sm">
+                    <div className="text-gray-600">澄清后无后续消息</div>
+                    <div className="mt-1 text-2xl font-bold text-gray-900">{stats.clarificationOverview.noFollowupConversationCount}</div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                  <div>
+                    <h3 className="mb-3 text-sm font-semibold text-gray-900">按触发原因看恢复率</h3>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-medium text-gray-700">触发原因</th>
+                            <th className="px-3 py-2 text-left font-medium text-gray-700">触发次数</th>
+                            <th className="px-3 py-2 text-left font-medium text-gray-700">恢复成功</th>
+                            <th className="px-3 py-2 text-left font-medium text-gray-700">转人工</th>
+                            <th className="px-3 py-2 text-left font-medium text-gray-700">无后续</th>
+                            <th className="px-3 py-2 text-left font-medium text-gray-700">恢复率</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {stats.clarificationReasonBreakdown.length === 0 && (
+                            <tr>
+                              <td colSpan={6} className="px-3 py-3 text-center text-gray-500">当前窗口内暂无澄清触发</td>
+                            </tr>
+                          )}
+                          {stats.clarificationReasonBreakdown.map((item) => (
+                            <tr key={item.reason}>
+                              <td className="px-3 py-3 font-medium text-gray-900">{getClarificationReasonLabel(item.reason)}</td>
+                              <td className="px-3 py-3 text-gray-700">{item.triggerCount}</td>
+                              <td className="px-3 py-3 text-gray-700">{item.recoveredCount}</td>
+                              <td className="px-3 py-3 text-gray-700">{item.handoffCount}</td>
+                              <td className="px-3 py-3 text-gray-700">{item.noFollowupCount}</td>
+                              <td className="px-3 py-3 text-gray-700">{item.recoveryRate}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="mb-3 text-sm font-semibold text-gray-900">澄清后的去向</h3>
+                    <div className="space-y-3">
+                      {stats.clarificationResolvedBreakdown.length === 0 && (
+                        <div className="rounded border border-dashed border-gray-200 px-3 py-4 text-sm text-gray-500">
+                          当前窗口内还没有可展示的澄清恢复结果。
+                        </div>
+                      )}
+                      {stats.clarificationResolvedBreakdown.map((item) => (
+                        <div key={item.resolvedTo} className="flex items-center justify-between rounded border border-gray-100 px-4 py-3 text-sm">
+                          <span className="font-medium text-gray-900">{getClarificationResolvedToLabel(item.resolvedTo)}</span>
+                          <span className="text-gray-700">{item.count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 shadow-sm">
+                <h2 className="text-lg font-semibold text-amber-950">怎么看这组指标</h2>
+                <div className="mt-3 space-y-2 text-sm text-amber-900">
+                  <div>1. 澄清触发会话高，但恢复成功也高：说明 guardrail 在拦错路，同时没有明显打断成交推进。</div>
+                  <div>2. 噪声输入触发多且无后续高：说明这批输入本身价值低，当前策略基本合理。</div>
+                  <div>3. 阻止沿用旧报价的触发多，但恢复率低：说明上下文拦截可能偏严，需要回看补参和改单短句样本。</div>
+                  <div>4. 意图不稳定触发后大量转人工：说明澄清文案或推荐承接可能还不够贴近业务话术。</div>
+                </div>
               </div>
             </div>
 

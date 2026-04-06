@@ -16,6 +16,8 @@ import {
 
 export const dynamic = 'force-dynamic'
 
+const POST_REDIRECT_STATUS = 303
+
 function redirectToAdminAccess(request: NextRequest, params: { error?: string; message?: string; next?: string }) {
   const url = new URL('/admin-access', request.url)
   if (params.error) {
@@ -27,7 +29,7 @@ function redirectToAdminAccess(request: NextRequest, params: { error?: string; m
   if (params.next) {
     url.searchParams.set('next', buildAdminRedirectTarget(params.next))
   }
-  return NextResponse.redirect(url)
+  return NextResponse.redirect(url, { status: POST_REDIRECT_STATUS })
 }
 
 async function parseRequest(request: NextRequest): Promise<{
@@ -105,7 +107,9 @@ export async function POST(request: NextRequest) {
 
   const response = expectsJson
     ? NextResponse.json({ ok: true, redirectTo: buildAdminRedirectTarget(next) })
-    : NextResponse.redirect(new URL(buildAdminRedirectTarget(next), request.url))
+    : NextResponse.redirect(new URL(buildAdminRedirectTarget(next), request.url), {
+        status: POST_REDIRECT_STATUS,
+      })
 
   response.cookies.set(
     ADMIN_ACCESS_COOKIE_NAME,

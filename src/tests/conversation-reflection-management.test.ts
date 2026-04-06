@@ -129,11 +129,13 @@ async function main() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             issueType: 'PARAM_MISSING',
-            correctedParams: {
-              pageCount: 32,
-              innerWeight: 157,
+            businessFeedback: {
+              problemSummary: '系统缺少页数和内页克重追问，业务员无法继续跟单。',
+              correctHandling: '应补参数',
+              correctResult: '应提示客户补 32 页和 157g 内页，再继续报价。',
+              shouldHandoff: 'no',
+              notes: '这个场景不需要转人工。',
             },
-            correctedQuoteSummary: '人工复核后按 32 页、157g 内页继续报价。',
           }),
         }),
         { params: { id: String(conversation.id) } }
@@ -142,6 +144,8 @@ async function main() {
       assert(reflectionPayload.ok, '会话详情页的 reflection 创建 API 应返回成功')
       assert(reflectionPayload.data.conversationId === conversation.id, '新 reflection 应属于当前会话')
       assert(reflectionPayload.data.issueType === 'PARAM_MISSING', '新 reflection 应保留 issueType')
+      assert(reflectionPayload.data.correctedParams?.businessFeedback?.correctHandling === '应补参数', '业务反馈应被结构化写入 correctedParams')
+      assert(reflectionPayload.data.correctedQuoteSummary?.includes('32 页'), 'correctResult 应被吸收到 correctedQuoteSummary')
 
       const detailAfterResponse = await conversationDetailGet(
         new Request(`http://localhost/api/conversations/${conversation.id}`),
@@ -496,7 +500,13 @@ async function main() {
           body: JSON.stringify({
             issueType: 'PACKAGING_REVIEW_REASON_WRONG',
             correctedParams: updatedCorrectedParams,
-            correctedQuoteSummary: '删除封口贴后继续作为主件修正记录保存。',
+            businessFeedback: {
+              problemSummary: '原记录把封口贴也算进了本次修正，业务判断不对。',
+              correctHandling: '应转人工',
+              correctResult: '删除封口贴后继续作为主件修正记录保存。',
+              shouldHandoff: 'yes',
+              notes: '这类窗位细节需要人工复核。',
+            },
           }),
         }),
         { params: { id: String(createPayload.data.id) } }
@@ -506,6 +516,7 @@ async function main() {
       assert(patchPayload.data.issueType === 'PACKAGING_REVIEW_REASON_WRONG', 'PATCH 后应更新 issueType')
       assert(patchPayload.data.correctedParams?.packagingContext?.subItems?.length === 0, 'PATCH 后应持久化空 subItems')
       assert(patchPayload.data.correctedParams?.packagingContext?.reviewReasons?.[0]?.label === '仅保留主件', 'PATCH 后应持久化新的 reviewReason')
+      assert(patchPayload.data.correctedParams?.businessFeedback?.shouldHandoff === 'yes', 'PATCH 后应保留业务反馈的转人工判断')
       assert(patchPayload.data.correctedQuoteSummary === '删除封口贴后继续作为主件修正记录保存。', 'PATCH 后应持久化新的 correctedQuoteSummary')
 
       const reflectionsResponse = await reflectionsGet(new Request('http://localhost/api/reflections?page=1&limit=20'))

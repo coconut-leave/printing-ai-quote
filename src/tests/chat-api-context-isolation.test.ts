@@ -209,6 +209,33 @@ async function main() {
     assert(!consultation.data, '咨询不应直接返回报价数据')
   })
 
+  await test('111222 不应进入缺参数或旧品类流程', async () => {
+    resetExtractCallCount()
+
+    const noisy = await sendChat!({
+      message: '111222',
+    })
+
+    assert(noisy.status === 'intent_only', '纯数字串应进入澄清兜底')
+    assert(noisy.intent === 'UNKNOWN', '纯数字串应识别为 UNKNOWN')
+    assert(getExtractCallCount() === 0, '纯数字串不应继续执行抽参')
+    assert(!noisy.mergedParams, '纯数字串不应生成 mergedParams')
+    assert(!noisy.data && !noisy.estimatedData, '纯数字串不应返回报价数据')
+  })
+
+  await test('无意义中文文本不应继续进入报价流程', async () => {
+    resetExtractCallCount()
+
+    const noisy = await sendChat!({
+      message: '男男女女男男女女',
+    })
+
+    assert(noisy.status === 'intent_only', '无意义中文文本应进入澄清兜底')
+    assert(noisy.intent === 'UNKNOWN', '无意义中文文本应识别为 UNKNOWN')
+    assert(getExtractCallCount() === 0, '无意义中文文本不应继续执行抽参')
+    assert(!noisy.data && !noisy.estimatedData, '无意义中文文本不应返回报价结果')
+  })
+
   await test('名片报价应重置旧画册上下文，并进入 handoff_required', async () => {
     const quotedAlbum = await sendChat!({
       message: '我想印1000本A4画册，封面200g铜版纸，内页157g铜版纸，骑马钉，32页，报价',

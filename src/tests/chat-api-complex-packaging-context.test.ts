@@ -225,6 +225,37 @@ async function main() {
     assert(noisy.blockedContextReuse === true, '乱码输入应显式阻断旧报价上下文复用')
   })
 
+  await test('已有正式报价后，纯数字串不应继续沿用旧报价', async () => {
+    const quoted = await sendChat!({
+      message: '双插盒，7*5*5CM，300克白卡，正反四色，5000个',
+    })
+
+    const noisy = await sendChat!({
+      conversationId: quoted.conversationId,
+      message: '111222',
+    })
+
+    assert(noisy.status === 'intent_only', '纯数字串应进入澄清兜底')
+    assert(noisy.status !== 'quoted' && noisy.status !== 'estimated' && noisy.status !== 'missing_fields', '纯数字串不应继续复用旧报价流程')
+    assert(!noisy.data && !noisy.estimatedData, '纯数字串不应返回旧报价数据')
+    assert(noisy.blockedContextReuse === true, '纯数字串应阻断上下文复用')
+  })
+
+  await test('已有正式报价后，中文无意义文本不应继续沿用旧报价', async () => {
+    const quoted = await sendChat!({
+      message: '双插盒，7*5*5CM，300克白卡，正反四色，5000个',
+    })
+
+    const noisy = await sendChat!({
+      conversationId: quoted.conversationId,
+      message: '挖洞啊文件哦大危机大宋',
+    })
+
+    assert(noisy.status === 'intent_only', '中文无意义文本应进入澄清兜底')
+    assert(!noisy.data && !noisy.estimatedData, '中文无意义文本不应继续返回旧报价结果')
+    assert(noisy.blockedContextReuse === true, '中文无意义文本应阻断上下文复用')
+  })
+
   await test('已有会话后，和当前报价无关的新模糊问题不应继续复用旧报价', async () => {
     const quoted = await sendChat!({
       message: '双插盒，7*5*5CM，300克白卡，正反四色，5000个',

@@ -1,4 +1,7 @@
+import { NextRequest } from 'next/server'
+import * as adminSessionRouteModule from '../app/api/admin/session/route'
 import {
+  ADMIN_ACTOR_COOKIE_NAME,
   buildGovernanceActorHeaders,
   createAdminActorSessionValue,
   GOVERNANCE_ACTOR_EMAIL_HEADER_NAME,
@@ -10,6 +13,9 @@ import {
   resolveAdminSessionActor,
 } from '@/lib/adminActorSession'
 import {
+  ADMIN_ACCESS_COOKIE_NAME,
+  getAdminAccessPageErrorMessage,
+  getAdminAccessPageInfoMessage,
   createAdminSessionToken,
   hasValidAdminAccess,
   isProtectedAdminApiPath,
@@ -23,7 +29,12 @@ interface TestResult {
 }
 
 const results: TestResult[] = []
-const testRuns: Array<Promise<void>> = []
+const tests: Array<{ name: string; fn: () => Promise<void> | void }> = []
+const postAdminSession = (
+  'POST' in adminSessionRouteModule
+    ? adminSessionRouteModule.POST
+    : (adminSessionRouteModule as { default?: { POST?: (request: NextRequest) => Promise<Response> } }).default?.POST
+)
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -32,20 +43,7 @@ function assert(condition: boolean, message: string) {
 }
 
 function test(name: string, fn: () => Promise<void> | void) {
-  const run = Promise.resolve()
-    .then(fn)
-    .then(() => {
-      results.push({ name, passed: true })
-      console.log(`✓ ${name}`)
-    })
-    .catch((err) => {
-      const error = err instanceof Error ? err.message : String(err)
-      results.push({ name, passed: false, error })
-      console.error(`✗ ${name}`)
-      console.error(`  └─ ${error}`)
-    })
-
-  testRuns.push(run)
+  tests.push({ name, fn })
 }
 
 console.log('\n=== 后台访问控制回归测试 ===\n')
@@ -70,6 +68,20 @@ test('session token 和 header secret 都可以建立授权', async () => {
   assert(await hasValidAdminAccess({ sessionToken: token, adminSecret: secret }), '有效 session token 应通过校验')
   assert(await hasValidAdminAccess({ headerSecret: secret, adminSecret: secret }), '有效 header secret 应通过校验')
   assert(!(await hasValidAdminAccess({ sessionToken: 'wrong-token', adminSecret: secret })), '错误 token 不应通过校验')
+})
+
+test('已授权 session 不应继续显示 unauthorized 顶部提示', () => {
+  const errorMessage = getAdminAccessPageErrorMessage({
+    error: 'unauthorized',
+    sessionActive: true,
+  })
+  const infoMessage = getAdminAccessPageInfoMessage({
+    error: 'unauthorized',
+    sessionActive: true,
+  })
+
+  assert(errorMessage === null, 'session 已有效时应抑制 unauthorized 错误提示')
+  assert(infoMessage?.includes('已登录后台'), 'session 已有效时应显示已登录后台提示')
 })
 
 test('后台操作者信息可随 session cookie 一起保存和解析', () => {
@@ -136,8 +148,84 @@ test('治理 actor 解析优先级应为 session 高于 header，再高于 fallb
   assert(fallbackActor.actorSource === 'legacy-placeholder', '最终 fallback 应保持 legacy-placeholder 来源')
 })
 
+test('后台登录成功后应返回 303，并同时写入授权与操作者 cookie', async () => {
+  assert(typeof postAdminSession === 'function', '应能加载后台 session route 的 POST 处理器')
+  const previousSecret = process.env.ADMIN_SECRET
+  process.env.ADMIN_SECRET = 'route-test-secret'
+
+  try {
+    const formData = new FormData()
+    formData.set('secret', 'route-test-secret')
+    formData.set('actorName', '测试后台员')
+    formData.set('actorEmail', 'admin@factory.test')
+    formData.set('next', '/dashboard')
+
+    const request = new NextRequest('http://localhost:3000/api/admin/session', {
+      method: 'POST',
+      body: formData,
+    })
+
+    const response = await postAdminSession(request)
+    const cookieHeaders = Array.from(response.headers.entries())
+      .filter(([name]) => name === 'set-cookie' || name === 'x-middleware-set-cookie')
+      .map(([, value]) => value)
+
+    assert(response.status === 303, '登录成功后的表单提交应使用 303 跳转')
+    assert(response.headers.get('location') === 'http://localhost:3000/dashboard', '登录成功后应跳转到 dashboard')
+    assert(cookieHeaders.some((value) => value.includes(ADMIN_ACCESS_COOKIE_NAME)), '响应中应写入后台授权 cookie')
+    assert(cookieHeaders.some((value) => value.includes(ADMIN_ACTOR_COOKIE_NAME)), '响应中应写入后台操作者 cookie')
+  } finally {
+    if (previousSecret === undefined) {
+      delete process.env.ADMIN_SECRET
+    } else {
+      process.env.ADMIN_SECRET = previousSecret
+    }
+  }
+})
+
+test('后台登录失败后应返回 303，并回到 admin-access 错误页', async () => {
+  assert(typeof postAdminSession === 'function', '应能加载后台 session route 的 POST 处理器')
+  const previousSecret = process.env.ADMIN_SECRET
+  process.env.ADMIN_SECRET = 'route-test-secret'
+
+  try {
+    const formData = new FormData()
+    formData.set('secret', 'wrong-secret')
+    formData.set('next', '/dashboard')
+
+    const request = new NextRequest('http://localhost:3000/api/admin/session', {
+      method: 'POST',
+      body: formData,
+    })
+
+    const response = await postAdminSession(request)
+    const location = response.headers.get('location') || ''
+
+    assert(response.status === 303, '登录失败后的表单提交也应使用 303 跳转')
+    assert(location.includes('/admin-access'), '登录失败后应跳回 admin-access')
+    assert(location.includes('error=invalid_secret'), '登录失败后应携带 invalid_secret 错误参数')
+  } finally {
+    if (previousSecret === undefined) {
+      delete process.env.ADMIN_SECRET
+    } else {
+      process.env.ADMIN_SECRET = previousSecret
+    }
+  }
+})
+
 async function main() {
-  await Promise.all(testRuns)
+  for (const item of tests) {
+    try {
+      await item.fn()
+      results.push({ name: item.name, passed: true })
+      console.log(`✓ ${item.name}`)
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err)
+      results.push({ name: item.name, passed: false, error })
+      console.error(`✗ ${item.name}`)
+      console.error(`  └─ ${error}`)
+    }
+  }
 
   console.log('\n=== 测试总结 ===\n')
   const passed = results.filter((item) => item.passed).length

@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { type ConversationDetailPayload, normalizeConversationDetailPayload } from '@/lib/admin/conversationDetail'
+import { ReflectionBusinessFeedbackForm } from '@/components/ReflectionBusinessFeedbackForm'
 import {
   buildConversationPresentation,
   getConversationStatusLabel,
@@ -13,23 +14,20 @@ import {
 import { formatParamsByProduct, getMissingFieldsChineseText } from '@/lib/catalog/helpers'
 import { AdminPageNav } from '@/components/AdminPageNav'
 import { HandoffRequestPanel } from '@/components/HandoffRequestPanel'
-import { PackagingCorrectedParamsEditor } from '@/components/PackagingCorrectedParamsEditor'
 import { PackagingReflectionDiff } from '@/components/PackagingReflectionDiff'
+import {
+  buildReflectionBusinessCorrectedParams,
+  buildReflectionBusinessFeedbackSummary,
+  extractReflectionBusinessFeedback,
+  type ReflectionBusinessFeedback,
+} from '@/lib/reflection/businessFeedback'
 import { buildReflectionContextSummary } from '@/lib/reflection/context'
 import {
   buildPackagingDraftSeed,
   resolvePackagingDraftOnIssueTypeChange,
 } from '@/lib/reflection/packagingEditorState'
 import {
-  addPackagingDraftReviewReason,
-  addPackagingDraftSubItem,
   buildPackagingCorrectedParamsPayload,
-  removePackagingDraftReviewReason,
-  removePackagingDraftSubItem,
-  updatePackagingDraftMainItem,
-  updatePackagingDraftRequiresHumanReview,
-  updatePackagingDraftReviewReason,
-  updatePackagingDraftSubItem,
   type PackagingCorrectedParamsDraft,
 } from '@/lib/reflection/packagingCorrectedParams'
 import {
@@ -178,8 +176,7 @@ export default function ConversationDetailPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [reflectionLoading, setReflectionLoading] = useState(false)
   const [reflectionIssueType, setReflectionIssueType] = useState<ReflectionIssueType>('PARAM_WRONG')
-  const [correctedParamsText, setCorrectedParamsText] = useState('')
-  const [correctedQuoteSummary, setCorrectedQuoteSummary] = useState('')
+  const [businessFeedback, setBusinessFeedback] = useState<ReflectionBusinessFeedback>({ shouldHandoff: 'unsure' })
   const [packagingDraft, setPackagingDraft] = useState<PackagingCorrectedParamsDraft | null>(null)
 
   const params = useParams<{ id: string | string[] }>()
@@ -226,6 +223,10 @@ export default function ConversationDetailPage() {
     ? buildPackagingCorrectedParamsPayload(packagingDraft)
     : undefined
   const showPackagingTemplate = isPackagingReflectionIssueType(reflectionIssueType) && Boolean(packagingCorrectedParams)
+
+  const updateBusinessFeedbackField = (field: keyof ReflectionBusinessFeedback, value: string) => {
+    setBusinessFeedback((current) => ({ ...current, [field]: value || undefined }))
+  }
 
   const loadConversation = async () => {
     if (Number.isNaN(conversationId)) {
@@ -301,16 +302,10 @@ export default function ConversationDetailPage() {
     if (!conversation || reflectionLoading) return
 
     let correctedParams: Record<string, any> | undefined
-    if (showPackagingTemplate && packagingCorrectedParams) {
-      correctedParams = packagingCorrectedParams
-    } else if (correctedParamsText.trim()) {
-      try {
-        correctedParams = JSON.parse(correctedParamsText)
-      } catch {
-        setError('修正参数 JSON 格式无效')
-        return
-      }
-    }
+    correctedParams = buildReflectionBusinessCorrectedParams({
+      correctedParams: showPackagingTemplate && packagingCorrectedParams ? packagingCorrectedParams : undefined,
+      businessFeedback,
+    })
 
     setReflectionLoading(true)
     setError(null)
@@ -323,8 +318,9 @@ export default function ConversationDetailPage() {
         credentials: 'same-origin',
         body: JSON.stringify({
           issueType: reflectionIssueType,
+          businessFeedback,
           correctedParams,
-          correctedQuoteSummary: correctedQuoteSummary.trim() || undefined,
+          correctedQuoteSummary: businessFeedback.correctResult || buildReflectionBusinessFeedbackSummary(businessFeedback) || undefined,
         }),
       })
       const data = await res.json()
@@ -334,9 +330,8 @@ export default function ConversationDetailPage() {
         return
       }
 
-      setCorrectedParamsText('')
       setPackagingDraft(null)
-      setCorrectedQuoteSummary('')
+  setBusinessFeedback({ shouldHandoff: 'unsure' })
       setSuccessMessage(`反思记录 #${data.data.id} 已创建，可前往反思记录页或学习看板继续查看。`)
       await loadConversation()
     } catch (err) {
@@ -344,38 +339,6 @@ export default function ConversationDetailPage() {
     } finally {
       setReflectionLoading(false)
     }
-  }
-
-  const handleMainItemFieldChange = (field: string, value: unknown) => {
-    setPackagingDraft((current) => (current ? updatePackagingDraftMainItem(current, field, value) : current))
-  }
-
-  const handleSubItemFieldChange = (index: number, field: string, value: unknown) => {
-    setPackagingDraft((current) => (current ? updatePackagingDraftSubItem(current, index, field, value) : current))
-  }
-
-  const handleAddSubItem = (productType: string) => {
-    setPackagingDraft((current) => (current ? addPackagingDraftSubItem(current, productType as any) : current))
-  }
-
-  const handleRemoveSubItem = (index: number) => {
-    setPackagingDraft((current) => (current ? removePackagingDraftSubItem(current, index) : current))
-  }
-
-  const handleReviewReasonChange = (index: number, field: 'label' | 'message', value: string) => {
-    setPackagingDraft((current) => (current ? updatePackagingDraftReviewReason(current, index, field, value) : current))
-  }
-
-  const handleAddReviewReason = () => {
-    setPackagingDraft((current) => (current ? addPackagingDraftReviewReason(current) : current))
-  }
-
-  const handleRemoveReviewReason = (index: number) => {
-    setPackagingDraft((current) => (current ? removePackagingDraftReviewReason(current, index) : current))
-  }
-
-  const handleRequiresHumanReviewChange = (value: boolean) => {
-    setPackagingDraft((current) => (current ? updatePackagingDraftRequiresHumanReview(current, value) : current))
   }
 
   if (loading) {
@@ -659,58 +622,18 @@ export default function ConversationDetailPage() {
           </div>
 
           <div className='mb-4 grid gap-3 rounded border p-3'>
-            <label className='text-sm'>
-              <span className='mb-1 block font-medium'>问题类型</span>
-              <select
-                value={reflectionIssueType}
-                onChange={(e) => setReflectionIssueType(e.target.value as any)}
-                className='w-full rounded border px-3 py-2 text-sm'
-              >
-                {REFLECTION_ISSUE_TYPE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
+            <ReflectionBusinessFeedbackForm
+              issueType={reflectionIssueType}
+              feedback={businessFeedback}
+              onIssueTypeChange={(value) => setReflectionIssueType(value)}
+              onFeedbackChange={updateBusinessFeedbackField}
+            />
 
-            <label className='text-sm'>
-              <span className='mb-1 block font-medium'>修正参数（可选）</span>
-              {showPackagingTemplate && packagingDraft ? (
-                <PackagingCorrectedParamsEditor
-                  issueType={reflectionIssueType}
-                  draft={packagingDraft}
-                  onMainItemFieldChange={handleMainItemFieldChange}
-                  onSubItemFieldChange={handleSubItemFieldChange}
-                  onAddSubItem={handleAddSubItem}
-                  onRemoveSubItem={handleRemoveSubItem}
-                  onReviewReasonChange={handleReviewReasonChange}
-                  onAddReviewReason={handleAddReviewReason}
-                  onRemoveReviewReason={handleRemoveReviewReason}
-                  onRequiresHumanReviewChange={handleRequiresHumanReviewChange}
-                />
-              ) : (
-                <textarea
-                  value={correctedParamsText}
-                  onChange={(e) => setCorrectedParamsText(e.target.value)}
-                  rows={4}
-                  placeholder='例如：{"pageCount": 32, "innerWeight": 157}'
-                  className='w-full rounded border px-3 py-2 font-mono text-xs'
-                />
-              )}
-            </label>
-
-            {isPackagingReflectionIssueType(reflectionIssueType) && !showPackagingTemplate && (
-              <p className='text-xs text-amber-700'>当前问题类型属于包装反思，但会话里没有可复用的复杂包装上下文，因此回退为原始 JSON 输入。</p>
+            {showPackagingTemplate && packagingDraft && (
+              <div className='rounded border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800'>
+                当前会话带有复杂包装结构，系统会在后台自动保留现有包装上下文，并把您填写的业务反馈一起写入反思记录，无需手动编辑 JSON。
+              </div>
             )}
-
-            <label className='text-sm'>
-              <span className='mb-1 block font-medium'>修正后报价摘要（可选）</span>
-              <input
-                value={correctedQuoteSummary}
-                onChange={(e) => setCorrectedQuoteSummary(e.target.value)}
-                placeholder='例如：人工核价后总价 ¥1980.00'
-                className='w-full rounded border px-3 py-2 text-sm'
-              />
-            </label>
           </div>
 
           <div className='space-y-3'>
@@ -724,6 +647,12 @@ export default function ConversationDetailPage() {
                 </div>
                 <p className='mb-2 text-sm'><span className='font-medium'>反思：</span>{item.reflectionText}</p>
                 <p className='text-sm'><span className='font-medium'>建议草案：</span>{item.suggestionDraft}</p>
+                {extractReflectionBusinessFeedback(item.correctedParams) && (
+                  <p className='mt-2 text-sm text-slate-700 whitespace-pre-wrap'>
+                    <span className='font-medium'>业务反馈：</span>
+                    {buildReflectionBusinessFeedbackSummary(extractReflectionBusinessFeedback(item.correctedParams))}
+                  </p>
+                )}
                 {buildReflectionContextSummary(item.originalExtractedParams, item.correctedParams) && (
                   <p className='mt-2 text-xs text-slate-500'>
                     <span className='font-medium'>包装上下文：</span>

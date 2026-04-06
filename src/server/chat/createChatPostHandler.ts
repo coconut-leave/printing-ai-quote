@@ -29,6 +29,16 @@ import {
 } from '@/lib/catalog/helpers'
 import { detectIntent, extractExplicitProductType, getIntentPlaceholderReply, looksLikeFreshQuoteRequest, type ChatIntent, type DetectIntentResult } from '@/server/intent/detectIntent'
 import { assessAnswerability, buildStableHandoffReply } from '@/server/intent/answerability'
+import {
+  assessStableBusinessInput,
+  buildUnstableBusinessInputReply,
+  looksLikeAbnormalNoiseInput,
+} from '@/server/intent/inputStability'
+import {
+  buildClarificationResolutionMetadata,
+  buildClarificationTriggerMetadata,
+  isClarificationTriggeredMetadata,
+} from '@/lib/chat/clarification'
 import { applyRecommendedPatch } from '@/server/intent/applyRecommendedPatch'
 import { buildRecommendationRerequestMessage } from '@/server/intent/applyRecommendedPatch'
 import { handleLightweightBusinessIntent } from '@/server/intent/handleIntent'
@@ -566,30 +576,9 @@ function isReusableComplexPackagingContextAction(action?: string | null): boolea
     || action === 'view_existing_quote'
 }
 
-function looksLikeAbnormalNoiseInput(message: string): boolean {
-  const text = message.trim()
-  if (!text) {
-    return true
-  }
-
-  if (/^[^\p{Script=Han}a-zA-Z0-9]+$/u.test(text)) {
-    return true
-  }
-
-  if (/^[a-z0-9_~`!@#$%^&*()+=[\]{}\\|;:'",.<>/?\-]{6,}$/i.test(text) && !/\s/.test(text)) {
-    return true
-  }
-
-  const hanCount = (text.match(/[\p{Script=Han}]/gu) || []).length
-  const digitCount = (text.match(/[0-9]/g) || []).length
-  const letterCount = (text.match(/[a-z]/gi) || []).length
-
-  return hanCount === 0 && digitCount === 0 && letterCount >= 6
-}
-
 function buildComplexPackagingClarificationReply(message: string): string {
   if (looksLikeAbnormalNoiseInput(message)) {
-    return '抱歉，我这边暂时没法稳定识别您这条需求。为避免给您错误结果，您可以再明确一下，或者我直接帮您转人工。'
+    return buildUnstableBusinessInputReply(message, true)
   }
 
   if (message.trim().length <= 12) {
@@ -729,6 +718,42 @@ export function createChatPostHandler(
       ])
       timing.mark('context_loaded')
 
+      const latestAssistantMetadata = [...(conversationDetails?.messages || [])]
+        .reverse()
+        .find((message) => message.sender === 'ASSISTANT' && message.metadata && typeof message.metadata === 'object')
+        ?.metadata as Record<string, any> | undefined
+      const pendingClarificationMetadata = isClarificationTriggeredMetadata(latestAssistantMetadata)
+        ? latestAssistantMetadata
+        : null
+
+      const withClarificationMetadata = (metadata: Record<string, any>) => {
+        const responseStatus = typeof metadata.responseStatus === 'string' ? metadata.responseStatus : null
+
+        if (responseStatus === 'intent_only') {
+          return {
+            ...metadata,
+            ...buildClarificationTriggerMetadata({
+              clarificationReason: typeof metadata.clarificationReason === 'string' ? metadata.clarificationReason : null,
+              blockedContextReuse: Boolean(metadata.blockedContextReuse),
+              fallbackMode: typeof metadata.fallbackMode === 'string' ? metadata.fallbackMode : null,
+            }),
+          }
+        }
+
+        const clarificationResolutionMetadata = buildClarificationResolutionMetadata({
+          clarificationMetadata: pendingClarificationMetadata,
+          responseStatus,
+        })
+
+        return Object.keys(clarificationResolutionMetadata).length > 0
+          ? { ...metadata, ...clarificationResolutionMetadata }
+          : metadata
+      }
+
+      const addAssistantMessage = (reply: string, metadata: Record<string, any>) => {
+        return addMessageToConversation(conversationId, 'ASSISTANT', reply, withClarificationMetadata(metadata))
+      }
+
       const latestRecommendedParams = getLatestRecommendedParams(conversationDetails)
       const messageProductType = extractExplicitProductType(payload.message)
       const activeContextProductType = getActiveContextProductType(historicalParams, latestRecommendedParams)
@@ -802,7 +827,7 @@ export function createChatPostHandler(
 
           await updateConversationStatus(conversationId, 'PENDING_HUMAN')
           await createHandoffRecord(conversationId, `answerability:${answerabilityDecision.reason}`, 'sales_team')
-          await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+          await addAssistantMessage(reply, {
             intent: responseIntent,
             intentReason: knowledgeIntentResult.reason,
             responseStatus: 'handoff_required',
@@ -838,7 +863,7 @@ export function createChatPostHandler(
           note: knowledgeAnswer.answerType,
         })
 
-        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+        await addAssistantMessage(reply, {
           intent: responseIntent,
           intentReason: knowledgeIntentResult.reason,
           responseStatus,
@@ -922,7 +947,7 @@ export function createChatPostHandler(
 
         await updateConversationStatus(conversationId, 'PENDING_HUMAN')
         await createHandoffRecord(conversationId, `intent:${intentResult.intent}`, 'sales_team')
-        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+        await addAssistantMessage(reply, {
           intent: intentResult.intent,
           intentReason: intentResult.reason,
           responseStatus: 'handoff_required',
@@ -956,7 +981,7 @@ export function createChatPostHandler(
 
         await updateConversationStatus(conversationId, 'PENDING_HUMAN')
         await createHandoffRecord(conversationId, 'intent:COMPLAINT', 'service_team')
-        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+        await addAssistantMessage(reply, {
           intent: intentResult.intent,
           intentReason: intentResult.reason,
           responseStatus: 'handoff_required',
@@ -991,7 +1016,7 @@ export function createChatPostHandler(
           executedQuoteEngine: false,
         })
 
-        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+        await addAssistantMessage(reply, {
           intent: intentResult.intent,
           intentReason: intentResult.reason,
           responseStatus,
@@ -1021,6 +1046,49 @@ export function createChatPostHandler(
       const scopedHistoricalParams = shouldBlockHistoricalQuoteReuse ? null : activeHistoricalParams
       const scopedRecommendedParams = shouldBlockHistoricalQuoteReuse ? null : activeRecommendedParams
       const scopedContextProductType = shouldBlockHistoricalQuoteReuse ? undefined : activeContextProductType
+      const unstableInputDecision = assessStableBusinessInput({
+        message: payload.message,
+        hasContext: Boolean(scopedHistoricalParams || scopedRecommendedParams || previousPackagingState),
+      })
+
+      if (unstableInputDecision.shouldBlock) {
+        const reply = unstableInputDecision.reply || buildUnstableBusinessInputReply(payload.message, Boolean(scopedHistoricalParams || scopedRecommendedParams || previousPackagingState))
+
+        logRouterDispatch({
+          conversationId,
+          requestId,
+          message: payload.message,
+          routerIntent: agentRoute.intent,
+          finalIntent: intentResult.intent,
+          branch: 'unstable_input_clarification',
+          responseStatus: 'intent_only',
+          usedRag: false,
+          executedHandoff: false,
+          executedQuoteEngine: false,
+          note: unstableInputDecision.reason,
+        })
+
+        await addAssistantMessage(reply, {
+          intent: intentResult.intent,
+          intentReason: intentResult.reason,
+          responseStatus: 'intent_only',
+          clarificationReason: unstableInputDecision.reason,
+          fallbackMode: 'clarify_restate_request',
+          blockedContextReuse: Boolean(scopedHistoricalParams || scopedRecommendedParams || previousPackagingState),
+        })
+
+        return respond({
+          ok: true,
+          status: 'intent_only',
+          intent: intentResult.intent,
+          intentReason: intentResult.reason,
+          conversationId,
+          reply,
+          clarificationReason: unstableInputDecision.reason,
+          fallbackMode: 'clarify_restate_request',
+          blockedContextReuse: Boolean(scopedHistoricalParams || scopedRecommendedParams || previousPackagingState),
+        })
+      }
 
       const recommendationRerequest = scopedRecommendedParams
         ? buildRecommendationRerequestMessage(scopedRecommendedParams, payload.message)
@@ -1049,7 +1117,7 @@ export function createChatPostHandler(
             executedQuoteEngine: false,
           })
 
-          await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+          await addAssistantMessage(reply, {
             intent: intentResult.intent,
             intentReason: intentResult.reason,
             responseStatus: 'recommendation_updated',
@@ -1094,7 +1162,7 @@ export function createChatPostHandler(
           note: 'blocked_unstable_complex_packaging_context_reuse',
         })
 
-        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+        await addAssistantMessage(reply, {
           intent: intentResult.intent,
           intentReason: intentResult.reason,
           responseStatus: 'intent_only',
@@ -1148,7 +1216,7 @@ export function createChatPostHandler(
 
           await updateConversationStatus(conversationId, 'PENDING_HUMAN')
           await createHandoffRecord(conversationId, `answerability:${answerabilityDecision.reason}`, 'sales_team')
-          await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+          await addAssistantMessage(reply, {
             intent: intentResult.intent,
             intentReason: intentResult.reason,
             responseStatus: 'handoff_required',
@@ -1185,7 +1253,7 @@ export function createChatPostHandler(
           executedQuoteEngine: false,
         })
 
-        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+        await addAssistantMessage(reply, {
           intent: intentResult.intent,
           intentReason: intentResult.reason,
           responseStatus,
@@ -1246,7 +1314,7 @@ export function createChatPostHandler(
 
         await updateConversationStatus(conversationId, 'PENDING_HUMAN')
         await createHandoffRecord(conversationId, `answerability:${answerabilityDecision.reason}`, 'sales_team')
-        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+        await addAssistantMessage(reply, {
           intent: intentResult.intent,
           intentReason: intentResult.reason,
           responseStatus: 'handoff_required',
@@ -1305,7 +1373,7 @@ export function createChatPostHandler(
 
           await updateConversationStatus(conversationId, 'PENDING_HUMAN')
           await createHandoffRecord(conversationId, '复杂包装文件参考或缺参，需人工复核', 'sales_team')
-          await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+          await addAssistantMessage(reply, {
             intent: intentResult.intent,
             intentReason: intentResult.reason,
             responseStatus: 'handoff_required',
@@ -1368,7 +1436,7 @@ export function createChatPostHandler(
           })
 
           await updateConversationStatus(conversationId, 'MISSING_FIELDS')
-          await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+          await addAssistantMessage(reply, {
             intent: intentResult.intent,
             intentReason: intentResult.reason,
             responseStatus: 'missing_fields',
@@ -1433,7 +1501,7 @@ export function createChatPostHandler(
           })
 
           await updateConversationStatus(conversationId, 'MISSING_FIELDS')
-          await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+          await addAssistantMessage(reply, {
             intent: intentResult.intent,
             intentReason: intentResult.reason,
             responseStatus: 'estimated',
@@ -1532,7 +1600,7 @@ export function createChatPostHandler(
         })
 
         await updateConversationStatus(conversationId, 'QUOTED')
-        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+        await addAssistantMessage(reply, {
           intent: intentResult.intent,
           intentReason: intentResult.reason,
           responseStatus: 'quoted',
@@ -1591,7 +1659,7 @@ export function createChatPostHandler(
 
         await updateConversationStatus(conversationId, 'PENDING_HUMAN')
         await createHandoffRecord(conversationId, '涉及设计文件或专业审稿需求', 'design_team')
-        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+        await addAssistantMessage(reply, {
           responseStatus: 'handoff_required',
         })
 
@@ -1649,7 +1717,7 @@ export function createChatPostHandler(
           executedQuoteEngine: false,
         })
 
-        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+        await addAssistantMessage(reply, {
           intent: intentResult.intent,
           intentReason: intentResult.reason,
           responseStatus: 'recommendation_updated',
@@ -1734,7 +1802,7 @@ export function createChatPostHandler(
             : '非标准或高风险询价，需人工接管',
           'sales_team'
         )
-        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+        await addAssistantMessage(reply, {
           intent: intentResult.intent,
           intentReason: intentResult.reason,
           responseStatus: 'handoff_required',
@@ -1789,7 +1857,7 @@ export function createChatPostHandler(
           })
 
           await updateConversationStatus(conversationId, 'MISSING_FIELDS')
-          await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+          await addAssistantMessage(reply, {
             intent: intentResult.intent,
             intentReason: intentResult.reason,
             responseStatus: 'estimated',
@@ -1847,7 +1915,7 @@ export function createChatPostHandler(
         })
 
         await updateConversationStatus(conversationId, 'MISSING_FIELDS')
-        await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+        await addAssistantMessage(reply, {
           intent: intentResult.intent,
           intentReason: intentResult.reason,
           responseStatus: 'missing_fields',
@@ -1966,7 +2034,7 @@ export function createChatPostHandler(
 
       await updateConversationStatus(conversationId, 'QUOTED')
 
-      await addMessageToConversation(conversationId, 'ASSISTANT', reply, {
+      await addAssistantMessage(reply, {
         intent: intentResult.intent,
         intentReason: intentResult.reason,
         responseStatus: 'quoted',

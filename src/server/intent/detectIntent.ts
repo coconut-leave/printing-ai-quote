@@ -26,6 +26,8 @@ export type DetectIntentResult = {
   reason: string
 }
 
+import { looksLikeAbnormalNoiseInput } from '@/server/intent/inputStability'
+
 const FILE_EXTENSION_KEYWORDS = ['pdf', 'cdr', 'psd', 'zip']
 const FILE_CONTEXT_KEYWORDS = ['附件', '设计稿', '源文件', '稿件', '文件', '审稿', '看稿', '排版文件']
 const FILE_ACTION_KEYWORDS = ['上传', '发你', '发给你', '帮我看', '看看', '核对', '按文件报价', '按稿报价', '文件报价', '文件核价']
@@ -99,16 +101,22 @@ const CONSULTATIVE_PACKAGING_PHRASES = [
   '用什么盒型',
   '适合什么盒型',
   '什么盒型合适',
+  '想做个包装',
+  '想做个盒子',
+  '做个包装',
+  '做个盒子',
+  '做外包装',
+  '想做外包装',
 ]
 const PACKAGING_USE_CASE_KEYWORDS = ['装', '用途', '场景', '护肤品', '化妆品', '美妆', '赠品', '礼品', '卡片', '小卡片']
 const RECOMMENDATION_CONFIRM_REFERENCE_KEYWORDS = [
   '按这个方案', '按这个来', '那就按这个', '那就这个', '就这个方案', '就这个', '按此方案', '照这个',
   '按这个报价', '按这个方案估价', '就按这个方案估价', '按这个估个参考价', '现在算一下', '现在估一下',
-  '按你推荐的来', '按你推荐的那个方案', '按你说的那个方案', '就这个规格', '那就按这个做',
+  '按你推荐的来', '按你推荐的那个方案', '按你说的那个方案', '就这个规格', '那就按这个做', '按这个做', '行那你算吧',
 ]
 const RECOMMENDATION_AFFIRMATION_KEYWORDS = ['可以', '行', '那就', '就按', '按这个', '按此', '照这个']
 const RECOMMENDATION_ADJUSTMENT_KEYWORDS = ['改成', '改为', '改一下', '页数改', '数量改', '尺寸改', '封面', '内页', '胶装', '骑马钉', '还是']
-const RECOMMENDATION_ACTION_KEYWORDS = ['报价', '估一下', '估个价', '估个参考价', '参考价', '报个价', '算一下', '再算', '先估', '再报', '核价']
+const RECOMMENDATION_ACTION_KEYWORDS = ['报价', '估一下', '估个价', '估个参考价', '参考价', '报个价', '算一下', '再算', '先估', '再报', '核价', '算吧']
 const RECOMMENDATION_EXCLUSION_KEYWORDS = [
   '还有别的推荐', '还有别的方案', '还有其他方案', '再推荐一个', '再给我推荐', '重新推荐',
   '更便宜的吗', '便宜一点的', '还有更便宜', '区别', '再说一下', '差多少', '哪个好', '怎么选',
@@ -214,7 +222,8 @@ function looksLikeParameterSupplement(text: string): boolean {
   const hasDigits = /\d/.test(text)
   const hasParamWords = includesAny(text, PARAM_HINT_KEYWORDS)
   const isShortMessage = text.length <= 80
-  return (hasDigits || hasParamWords) && isShortMessage
+  const hasStructuredNumericSignal = hasQuantityOrSpecSignal(text)
+  return (hasParamWords || hasStructuredNumericSignal || (hasDigits && includesAny(text, PRODUCT_KEYWORDS))) && isShortMessage
 }
 
 function hasQuantityOrSpecSignal(text: string): boolean {
@@ -308,6 +317,10 @@ function looksLikeRecommendationConfirmation(text: string): boolean {
 export function detectIntent(input: DetectIntentInput): DetectIntentResult {
   const text = input.message.trim().toLowerCase()
 
+  if (looksLikeAbnormalNoiseInput(text)) {
+    return { intent: 'UNKNOWN', reason: 'unstable_noise_input' }
+  }
+
   if (hasStrongFileReviewSignal(text)) {
     return { intent: 'FILE_REVIEW_REQUEST', reason: 'file_keywords_detected' }
   }
@@ -338,6 +351,10 @@ export function detectIntent(input: DetectIntentInput): DetectIntentResult {
 
   if (looksLikeConsultativePackagingInquiry(text)) {
     return { intent: 'SOLUTION_RECOMMENDATION', reason: 'consultative_packaging_inquiry_detected' }
+  }
+
+  if (!hasCompleteQuoteSignal(text) && includesAny(text, BARGAIN_KEYWORDS) && includesAny(text, ['推荐', '方案', '怎么选'])) {
+    return { intent: 'SOLUTION_RECOMMENDATION', reason: 'budget_recommendation_detected' }
   }
 
   if (includesAny(text, BARGAIN_KEYWORDS)) {

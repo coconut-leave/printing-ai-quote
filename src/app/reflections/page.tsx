@@ -3,23 +3,21 @@
 import { Fragment, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { AdminPageNav } from '@/components/AdminPageNav'
-import { PackagingCorrectedParamsEditor } from '@/components/PackagingCorrectedParamsEditor'
+import { ReflectionBusinessFeedbackForm } from '@/components/ReflectionBusinessFeedbackForm'
 import { PackagingReflectionDiff } from '@/components/PackagingReflectionDiff'
+import {
+  buildReflectionBusinessCorrectedParams,
+  buildReflectionBusinessFeedbackSummary,
+  extractReflectionBusinessFeedback,
+  type ReflectionBusinessFeedback,
+} from '@/lib/reflection/businessFeedback'
 import { buildReflectionContextSummary } from '@/lib/reflection/context'
 import {
   buildPackagingDraftSeed,
   resolvePackagingDraftOnIssueTypeChange,
 } from '@/lib/reflection/packagingEditorState'
 import {
-  addPackagingDraftReviewReason,
-  addPackagingDraftSubItem,
   buildPackagingCorrectedParamsPayload,
-  removePackagingDraftReviewReason,
-  removePackagingDraftSubItem,
-  updatePackagingDraftMainItem,
-  updatePackagingDraftRequiresHumanReview,
-  updatePackagingDraftReviewReason,
-  updatePackagingDraftSubItem,
   type PackagingCorrectedParamsDraft,
 } from '@/lib/reflection/packagingCorrectedParams'
 import {
@@ -83,8 +81,7 @@ export default function ReflectionsPage() {
   const [savingId, setSavingId] = useState<number | null>(null)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editingIssueType, setEditingIssueType] = useState<ReflectionIssueType>('PARAM_WRONG')
-  const [editingCorrectedParamsText, setEditingCorrectedParamsText] = useState('')
-  const [editingCorrectedQuoteSummary, setEditingCorrectedQuoteSummary] = useState('')
+  const [editingBusinessFeedback, setEditingBusinessFeedback] = useState<ReflectionBusinessFeedback>({ shouldHandoff: 'unsure' })
   const [editingPackagingDraft, setEditingPackagingDraft] = useState<PackagingCorrectedParamsDraft | null>(null)
   const [editingError, setEditingError] = useState<string | null>(null)
   const [editingSuccess, setEditingSuccess] = useState<string | null>(null)
@@ -172,8 +169,7 @@ export default function ReflectionsPage() {
   function resetEditingState() {
     setEditingId(null)
     setEditingIssueType('PARAM_WRONG')
-    setEditingCorrectedParamsText('')
-    setEditingCorrectedQuoteSummary('')
+    setEditingBusinessFeedback({ shouldHandoff: 'unsure' })
     setEditingPackagingDraft(null)
     setEditingError(null)
     setEditingSuccess(null)
@@ -187,8 +183,10 @@ export default function ReflectionsPage() {
 
     setEditingId(record.id)
     setEditingIssueType(record.issueType)
-    setEditingCorrectedParamsText(record.correctedParams ? JSON.stringify(record.correctedParams, null, 2) : '')
-    setEditingCorrectedQuoteSummary(record.correctedQuoteSummary || '')
+    setEditingBusinessFeedback(extractReflectionBusinessFeedback(record.correctedParams) || {
+      correctResult: record.correctedQuoteSummary || undefined,
+      shouldHandoff: 'unsure',
+    })
     setEditingPackagingDraft(buildPackagingDraftSeed({
       issueType: record.issueType,
       originalExtractedParams: record.originalExtractedParams,
@@ -218,23 +216,22 @@ export default function ReflectionsPage() {
     }))
   }
 
+  function handleEditingBusinessFeedbackChange(field: keyof ReflectionBusinessFeedback, value: string) {
+    setEditingBusinessFeedback((current) => ({ ...current, [field]: value || undefined }))
+    setEditingSuccess(null)
+  }
+
   async function saveEditingRecord() {
     if (!editingRecord || savingId === editingRecord.id) {
       return
     }
 
-    let correctedParams: Record<string, any> | null = null
-
-    if (showPackagingTemplate && editingPackagingDraft) {
-      correctedParams = buildPackagingCorrectedParamsPayload(editingPackagingDraft)
-    } else if (editingCorrectedParamsText.trim()) {
-      try {
-        correctedParams = JSON.parse(editingCorrectedParamsText)
-      } catch {
-        setEditingError('修正参数 JSON 格式无效')
-        return
-      }
-    }
+    const correctedParams = buildReflectionBusinessCorrectedParams({
+      correctedParams: showPackagingTemplate && editingPackagingDraft
+        ? buildPackagingCorrectedParamsPayload(editingPackagingDraft)
+        : editingRecord.correctedParams || null,
+      businessFeedback: editingBusinessFeedback,
+    }) || null
 
     try {
       setSavingId(editingRecord.id)
@@ -247,8 +244,9 @@ export default function ReflectionsPage() {
         credentials: 'same-origin',
         body: JSON.stringify({
           issueType: editingIssueType,
+          businessFeedback: editingBusinessFeedback,
           correctedParams,
-          correctedQuoteSummary: editingCorrectedQuoteSummary.trim() || null,
+          correctedQuoteSummary: editingBusinessFeedback.correctResult || buildReflectionBusinessFeedbackSummary(editingBusinessFeedback) || null,
         }),
       })
       const data = await res.json()
@@ -265,11 +263,10 @@ export default function ReflectionsPage() {
               ...data.data,
               issueType: editingIssueType,
               correctedParams,
-              correctedQuoteSummary: editingCorrectedQuoteSummary.trim() || null,
+              correctedQuoteSummary: editingBusinessFeedback.correctResult || buildReflectionBusinessFeedbackSummary(editingBusinessFeedback) || null,
             }
           : record
       )))
-      setEditingCorrectedParamsText(correctedParams ? JSON.stringify(correctedParams, null, 2) : '')
       setEditingPackagingDraft(buildPackagingDraftSeed({
         issueType: editingIssueType,
         originalExtractedParams: editingRecord.originalExtractedParams,
@@ -283,38 +280,6 @@ export default function ReflectionsPage() {
     } finally {
       setSavingId(null)
     }
-  }
-
-  const handleMainItemFieldChange = (field: string, value: unknown) => {
-    setEditingPackagingDraft((current) => (current ? updatePackagingDraftMainItem(current, field, value) : current))
-  }
-
-  const handleSubItemFieldChange = (index: number, field: string, value: unknown) => {
-    setEditingPackagingDraft((current) => (current ? updatePackagingDraftSubItem(current, index, field, value) : current))
-  }
-
-  const handleAddSubItem = (productType: string) => {
-    setEditingPackagingDraft((current) => (current ? addPackagingDraftSubItem(current, productType as any) : current))
-  }
-
-  const handleRemoveSubItem = (index: number) => {
-    setEditingPackagingDraft((current) => (current ? removePackagingDraftSubItem(current, index) : current))
-  }
-
-  const handleReviewReasonChange = (index: number, field: 'label' | 'message', value: string) => {
-    setEditingPackagingDraft((current) => (current ? updatePackagingDraftReviewReason(current, index, field, value) : current))
-  }
-
-  const handleAddReviewReason = () => {
-    setEditingPackagingDraft((current) => (current ? addPackagingDraftReviewReason(current) : current))
-  }
-
-  const handleRemoveReviewReason = (index: number) => {
-    setEditingPackagingDraft((current) => (current ? removePackagingDraftReviewReason(current, index) : current))
-  }
-
-  const handleRequiresHumanReviewChange = (value: boolean) => {
-    setEditingPackagingDraft((current) => (current ? updatePackagingDraftRequiresHumanReview(current, value) : current))
   }
 
   const getStatusBadgeClass = (status: string) => {
@@ -571,6 +536,11 @@ export default function ReflectionsPage() {
                               修正摘要：{record.correctedQuoteSummary}
                             </p>
                           )}
+                          {extractReflectionBusinessFeedback(record.correctedParams) && (
+                            <p className="mt-2 text-xs text-slate-600 whitespace-pre-wrap">
+                              业务反馈：{buildReflectionBusinessFeedbackSummary(extractReflectionBusinessFeedback(record.correctedParams))}
+                            </p>
+                          )}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate">
                           <div className="max-w-xs whitespace-pre-wrap">{record.suggestionDraft}</div>
@@ -695,57 +665,19 @@ export default function ReflectionsPage() {
                               )}
 
                               <label className="text-sm">
-                                <span className="mb-1 block font-medium text-slate-700">问题类型</span>
-                                <select
-                                  value={editingIssueType}
-                                  onChange={(event) => handleEditingIssueTypeChange(event.target.value)}
-                                  className="w-full rounded border border-gray-300 px-3 py-2"
-                                >
-                                  {REFLECTION_ISSUE_TYPE_OPTIONS.map((option) => (
-                                    <option key={option.value} value={option.value}>{option.label}</option>
-                                  ))}
-                                </select>
-                              </label>
-
-                              <label className="text-sm">
-                                <span className="mb-1 block font-medium text-slate-700">修正参数</span>
-                                {showPackagingTemplate && editingPackagingDraft ? (
-                                  <PackagingCorrectedParamsEditor
-                                    issueType={editingIssueType}
-                                    draft={editingPackagingDraft}
-                                    onMainItemFieldChange={handleMainItemFieldChange}
-                                    onSubItemFieldChange={handleSubItemFieldChange}
-                                    onAddSubItem={handleAddSubItem}
-                                    onRemoveSubItem={handleRemoveSubItem}
-                                    onReviewReasonChange={handleReviewReasonChange}
-                                    onAddReviewReason={handleAddReviewReason}
-                                    onRemoveReviewReason={handleRemoveReviewReason}
-                                    onRequiresHumanReviewChange={handleRequiresHumanReviewChange}
-                                  />
-                                ) : (
-                                  <textarea
-                                    value={editingCorrectedParamsText}
-                                    onChange={(event) => setEditingCorrectedParamsText(event.target.value)}
-                                    rows={8}
-                                    placeholder='例如：{"pageCount": 32, "innerWeight": 157}'
-                                    className="w-full rounded border px-3 py-2 font-mono text-xs"
-                                  />
-                                )}
-                              </label>
-
-                              {isPackagingReflectionIssueType(editingIssueType) && !showPackagingTemplate && (
-                                <p className="text-xs text-amber-700">当前问题类型属于包装反思，但这条记录没有可复用的 complex packaging 上下文，已回退为 JSON 编辑。</p>
-                              )}
-
-                              <label className="text-sm">
-                                <span className="mb-1 block font-medium text-slate-700">修正后报价摘要</span>
-                                <input
-                                  value={editingCorrectedQuoteSummary}
-                                  onChange={(event) => setEditingCorrectedQuoteSummary(event.target.value)}
-                                  placeholder='例如：人工复核后保留预报价并补齐开窗尺寸'
-                                  className="w-full rounded border px-3 py-2 text-sm"
+                                <ReflectionBusinessFeedbackForm
+                                  issueType={editingIssueType}
+                                  feedback={editingBusinessFeedback}
+                                  onIssueTypeChange={handleEditingIssueTypeChange}
+                                  onFeedbackChange={handleEditingBusinessFeedbackChange}
                                 />
                               </label>
+
+                              {showPackagingTemplate && editingPackagingDraft && (
+                                <div className="rounded border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+                                  这条记录原本带有复杂包装结构，保存时系统会自动保留结构化上下文，并把业务员填写的自然语言反馈一起写入内部 correctedParams。
+                                </div>
+                              )}
                             </div>
                           </td>
                         </tr>

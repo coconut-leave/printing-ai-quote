@@ -367,6 +367,10 @@ function applyRegexFallback(userText: string, llmResult: any): any {
 function computeMissingFields(params: any, productType: string): string[] {
   const missing: string[] = []
 
+  if (!productType) {
+    return missing
+  }
+
   if (productType === 'flyer') {
     const required = ['finishedSize', 'quantity', 'paperType', 'paperWeight', 'printSides']
     required.forEach(field => {
@@ -441,7 +445,7 @@ async function callOpenAIWithTimeout(userText: string): Promise<ExtractedQuotePa
 
 Return JSON with exactly these fields:
 {
-  "productType": string (map "画册/album" to "album", "传单/flyer" to "flyer", "名片/business card" to "business_card", "海报/poster" to "poster", default "album"),
+  "productType": string or null (map "画册/album" to "album", "传单/flyer" to "flyer", "名片/business card" to "business_card", "海报/poster" to "poster"; if not stable, return null),
   "finishedSize": string (map "A4" to "A4", "A3" to "A3", etc.),
   "quantity": number (extract number like 1000),
   "coverPaper": string (map "铜版纸" to "coated", "哑光纸" to "matte", "艺术纸" to "art", "标准纸" to "standard", for album only),
@@ -459,6 +463,7 @@ Return JSON with exactly these fields:
 
 Rules:
 - Extract values from the text if available, use null if not mentioned
+- If the text is noise, pure digits, gibberish, or cannot be stably mapped to a supported business product, keep productType as null
 - For flyer: paperType (not coverPaper), paperWeight (not coverWeight), printSides are the key fields
 - For poster: paperType, paperWeight are required; lamination is optional and can be null
 - For album: coverPaper, coverWeight, innerPaper, innerWeight, bindingType are key fields
@@ -514,7 +519,7 @@ Rules:
   }
 
   let result: ExtractedQuoteParams = {
-    productType: parsed.productType ?? 'album',
+    productType: typeof parsed.productType === 'string' ? parsed.productType : undefined,
     finishedSize: parsed.finishedSize ?? undefined,
     quantity: parsed.quantity != null ? Number(parsed.quantity) : undefined,
     coverPaper: parsed.coverPaper ?? undefined,
@@ -530,16 +535,12 @@ Rules:
     missingFields: [],
   }
 
-  if (!result.productType) {
-    result.productType = 'album'
-  }
-
   // ============ 应用规则补充 ============
   result = applyRegexFallback(userText, result)
 
   // ============ 计算最终缺失字段 ============
-  const productType = (result.productType || 'album').toLowerCase()
-  result.missingFields = computeMissingFields(result, productType)
+  const productType = typeof result.productType === 'string' ? result.productType.toLowerCase() : ''
+  result.missingFields = productType ? computeMissingFields(result, productType) : []
 
   return result
 }
@@ -553,7 +554,6 @@ function extractParamsByRegexOnly(userText: string): ExtractedQuoteParams | null
    */
 
   const result: any = {
-    productType: 'album', // 默认值
     missingFields: [],
   }
 
@@ -636,8 +636,8 @@ function extractParamsByRegexOnly(userText: string): ExtractedQuoteParams | null
   }
 
   // 计算缺失字段
-  const productTypeFinal = result.productType || 'album'
-  result.missingFields = computeMissingFields(result, productTypeFinal)
+  const productTypeFinal = typeof result.productType === 'string' ? result.productType : ''
+  result.missingFields = productTypeFinal ? computeMissingFields(result, productTypeFinal) : []
 
   // 如果没有任何参数被提取，返回 null
   const hasAnyParam = Object.keys(result).some(key =>

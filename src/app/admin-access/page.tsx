@@ -5,10 +5,14 @@ import {
   ADMIN_ACCESS_COOKIE_NAME,
   ADMIN_SECRET_HEADER_NAME,
   buildAdminRedirectTarget,
+  getAdminAccessPageErrorMessage,
+  getAdminAccessPageInfoMessage,
   getAdminSecretFromEnv,
   hasValidAdminAccess,
   isProductionEnvironment,
 } from '@/lib/adminAccess'
+
+export const dynamic = 'force-dynamic'
 
 type AdminAccessPageProps = {
   searchParams?: {
@@ -18,41 +22,45 @@ type AdminAccessPageProps = {
   }
 }
 
-function getErrorMessage(error?: string): string | null {
-  if (error === 'unauthorized') {
-    return '当前还没有后台访问会话，请输入 ADMIN_SECRET 进入后台。'
-  }
-
-  if (error === 'missing_secret') {
-    return '当前环境没有配置 ADMIN_SECRET，生产环境下后台页和管理 API 会保持关闭。'
-  }
-
-  if (error === 'invalid_secret') {
-    return '输入的 ADMIN_SECRET 不正确，请重新输入。'
-  }
-
-  return null
-}
-
-function getMessage(message?: string): string | null {
-  if (message === 'logged_out') {
-    return '后台访问会话已清除。'
-  }
-
-  return null
-}
-
 export default async function AdminAccessPage({ searchParams }: AdminAccessPageProps) {
   const adminSecret = getAdminSecretFromEnv()
   const nextPath = buildAdminRedirectTarget(searchParams?.next)
-  const sessionToken = cookies().get(ADMIN_ACCESS_COOKIE_NAME)?.value
-  const currentActor = parseAdminActorSessionValue(cookies().get(ADMIN_ACTOR_COOKIE_NAME)?.value)
+  const cookieStore = cookies()
+  const sessionToken = cookieStore.get(ADMIN_ACCESS_COOKIE_NAME)?.value
+  const actorCookieValue = cookieStore.get(ADMIN_ACTOR_COOKIE_NAME)?.value
+  const currentActor = parseAdminActorSessionValue(actorCookieValue)
   const sessionActive = adminSecret
     ? await hasValidAdminAccess({ sessionToken, adminSecret })
     : false
-  const errorMessage = getErrorMessage(searchParams?.error)
-  const infoMessage = getMessage(searchParams?.message)
+  const errorMessage = getAdminAccessPageErrorMessage({
+    error: searchParams?.error,
+    message: searchParams?.message,
+    sessionActive,
+  })
+  const infoMessage = getAdminAccessPageInfoMessage({
+    error: searchParams?.error,
+    message: searchParams?.message,
+    sessionActive,
+  })
   const protectionEnabled = Boolean(adminSecret)
+  const hasAccessCookie = Boolean(sessionToken)
+  const hasActorCookie = Boolean(actorCookieValue)
+  const activeActor = sessionActive ? currentActor : null
+  const actorStatusText = activeActor
+    ? formatGovernanceActorLabel(activeActor)
+    : hasActorCookie
+      ? '已写入，但当前未与有效后台会话绑定'
+      : '未记录'
+  const sessionStatusText = sessionActive
+    ? '已授权'
+    : hasAccessCookie
+      ? '检测到 Cookie，但未通过校验'
+      : '未授权'
+  const quickLinks = [
+    { href: nextPath, label: nextPath === '/dashboard' ? '进入 Dashboard' : `继续前往 ${nextPath}` },
+    { href: '/dashboard', label: '打开 Dashboard' },
+    { href: '/conversations', label: '打开 Conversations' },
+  ].filter((item, index, items) => items.findIndex((candidate) => candidate.href === item.href) === index)
 
   return (
     <main className='mx-auto flex min-h-screen max-w-3xl flex-col justify-center px-6 py-12'>
@@ -75,6 +83,26 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
           </div>
         )}
 
+        {sessionActive && (
+          <div className='mt-6 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4'>
+            <p className='text-sm font-semibold text-emerald-900'>已登录后台</p>
+            <p className='mt-2 text-sm leading-6 text-emerald-800'>
+              当前授权会话已被服务器识别，页面提示、状态栏和后台 cookie 会按同一份 session 状态展示。
+            </p>
+            <div className='mt-4 flex flex-wrap gap-3'>
+              {quickLinks.map((item) => (
+                <a
+                  key={item.href}
+                  href={item.href}
+                  className='rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white'
+                >
+                  {item.label}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
         {!protectionEnabled && !isProductionEnvironment() && (
           <div className='mt-6 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800'>
             当前是开发环境，且没有配置 <code>ADMIN_SECRET</code>，所以后台保护默认关闭，方便本地调试。若要验证未授权/已授权流程，请先在 <code>.env</code> 中补上 <code>ADMIN_SECRET</code>。
@@ -89,7 +117,7 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
 
         <div className='mt-8 grid gap-6 md:grid-cols-[minmax(0,1fr)_280px]'>
           <section className='rounded-2xl border border-slate-200 bg-slate-50 p-5'>
-            <h2 className='text-sm font-semibold text-slate-900'>建立后台访问会话</h2>
+            <h2 className='text-sm font-semibold text-slate-900'>{sessionActive ? '更新后台访问会话' : '建立后台访问会话'}</h2>
             <form action='/api/admin/session' method='post' className='mt-4 space-y-4'>
               <input type='hidden' name='next' value={nextPath} />
               <label className='block text-sm text-slate-700'>
@@ -135,7 +163,7 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
                 disabled={!protectionEnabled}
                 className='rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300'
               >
-                进入后台
+                {sessionActive ? '更新授权并进入后台' : '进入后台'}
               </button>
             </form>
 
@@ -159,11 +187,19 @@ export default async function AdminAccessPage({ searchParams }: AdminAccessPageP
               </div>
               <div>
                 <dt className='font-medium text-slate-900'>后台会话</dt>
-                <dd>{sessionActive ? '已授权' : '未授权'}</dd>
+                <dd>{sessionStatusText}</dd>
               </div>
               <div>
                 <dt className='font-medium text-slate-900'>当前操作者</dt>
-                <dd>{formatGovernanceActorLabel(currentActor)}</dd>
+                <dd>{actorStatusText}</dd>
+              </div>
+              <div>
+                <dt className='font-medium text-slate-900'>授权 Cookie</dt>
+                <dd>{hasAccessCookie ? '已写入' : '未写入'}</dd>
+              </div>
+              <div>
+                <dt className='font-medium text-slate-900'>操作者 Cookie</dt>
+                <dd>{hasActorCookie ? '已写入' : '未写入'}</dd>
               </div>
               <div>
                 <dt className='font-medium text-slate-900'>授权后默认跳转</dt>
