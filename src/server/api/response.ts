@@ -20,14 +20,16 @@ export enum ErrorCode {
   VALIDATION_ERROR = 'VALIDATION_ERROR',
   NOT_FOUND = 'NOT_FOUND',
   INTERNAL_ERROR = 'INTERNAL_ERROR',
+  CONFIG_ERROR = 'CONFIG_ERROR',
   EXTERNAL_SERVICE_ERROR = 'EXTERNAL_SERVICE_ERROR',
   DATABASE_ERROR = 'DATABASE_ERROR',
   UNAUTHORIZED = 'UNAUTHORIZED',
   BAD_REQUEST = 'BAD_REQUEST',
 }
 
-// 环境判断
-const isProduction = process.env.NODE_ENV === 'production'
+function isProductionEnvironment(): boolean {
+  return process.env.NODE_ENV === 'production'
+}
 
 type LogLevel = 'INFO' | 'WARN' | 'ERROR'
 
@@ -61,6 +63,21 @@ function sanitizeLogDetails(details: unknown): unknown {
 
     return value
   }))
+}
+
+function isConfigErrorMessage(message: string): boolean {
+  return message.includes('Missing required environment variable:')
+    || message.includes('environment variable')
+}
+
+function isDatabaseErrorMessage(message: string): boolean {
+  const normalizedMessage = message.toLowerCase()
+  return normalizedMessage.includes('prisma')
+    || normalizedMessage.includes('database')
+    || normalizedMessage.includes('connection')
+    || normalizedMessage.includes('postgres')
+    || normalizedMessage.includes('migration')
+    || message.includes('Invalid `prisma')
 }
 
 // 创建成功响应
@@ -99,8 +116,20 @@ export function createErrorResponse(
 // 将未知异常转换为安全错误消息
 export function safeErrorMessage(err: unknown): string {
   if (err instanceof Error) {
+    if (isConfigErrorMessage(err.message)) {
+      return isProductionEnvironment()
+        ? '服务配置不完整，请检查 Railway 环境变量是否已配置。'
+        : err.message
+    }
+
+    if (isDatabaseErrorMessage(err.message)) {
+      return isProductionEnvironment()
+        ? '数据库暂时不可用，请检查 DATABASE_URL 与 Prisma 迁移状态。'
+        : err.message
+    }
+
     // 生产环境：隐藏敏感信息
-    if (isProduction) {
+    if (isProductionEnvironment()) {
       // 检查是否是已知的安全错误类型
       if (err.message.includes('OPENAI_API_KEY') ||
           err.message.includes('api key') ||
@@ -133,7 +162,7 @@ export function logError(err: unknown, context?: string): void {
   console.error(formatLogLine('ERROR', errorMessage, context))
 
   // 生产环境记录更多调试信息到日志
-  if (isProduction && errorStack) {
+  if (isProductionEnvironment() && errorStack) {
     console.error(formatLogLine('ERROR', 'stack trace follows', context))
     console.error(errorStack)
   }
@@ -172,6 +201,12 @@ export async function withErrorHandler(
       if (err.message.includes('not found') || err.message.includes('Not found')) {
         code = ErrorCode.NOT_FOUND
         status = 404
+      } else if (isConfigErrorMessage(err.message)) {
+        code = ErrorCode.CONFIG_ERROR
+        status = 500
+      } else if (isDatabaseErrorMessage(err.message)) {
+        code = ErrorCode.DATABASE_ERROR
+        status = 500
       } else if (err.message.includes('validation') || err.message.includes('Invalid')) {
         code = ErrorCode.VALIDATION_ERROR
         status = 400
@@ -181,9 +216,6 @@ export async function withErrorHandler(
       } else if (err.message.includes('OpenAI') || err.message.includes('API')) {
         code = ErrorCode.EXTERNAL_SERVICE_ERROR
         status = 502
-      } else if (err.message.includes('database') || err.message.includes('prisma')) {
-        code = ErrorCode.DATABASE_ERROR
-        status = 500
       }
     }
 
