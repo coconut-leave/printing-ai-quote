@@ -4,6 +4,8 @@ import { createErrorResponse, withErrorHandler, ErrorCode } from '@/server/api/r
 import {
   buildQuoteSnapshotFromQuoteRecord,
   buildSingleQuoteWorkbook,
+  getQuoteSnapshotDeliveryBlockMessage,
+  isDeliverableQuoteSnapshot,
   renderSingleQuotePreviewHtml,
 } from '@/server/export/quoteExcel'
 
@@ -42,6 +44,14 @@ export async function GET(request: Request, { params }: { params: { id?: string 
       },
       quote,
     })
+
+    if (!isDeliverableQuoteSnapshot(snapshot)) {
+      return createErrorResponse(
+        getQuoteSnapshotDeliveryBlockMessage(snapshot),
+        ErrorCode.BAD_REQUEST,
+        409
+      )
+    }
 
     const format = new URL(request.url).searchParams.get('format')
     if (format === 'xlsx') {

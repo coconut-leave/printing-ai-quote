@@ -21,7 +21,7 @@ interface TestResult {
 
 const results: TestResult[] = []
 
-function assert(condition: boolean, message: string) {
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message)
   }
@@ -177,7 +177,7 @@ async function main() {
     const mergedWithoutSubItems = mergeReflectionPackagingContext(baseOriginalExtractedParams, payloadWithoutSubItems)
     assert(payloadWithoutSubItems.isBundle === false, '删除全部 subItems 后 isBundle 应为 false')
     assert(payloadWithoutSubItems.packagingContext.subItems.length === 0, 'payload 应保留空 subItems 数组')
-    assert((mergedWithoutSubItems?.subItems.length || 0) === 0, '合并上下文后不应回退原始 subItems')
+    assert((mergedWithoutSubItems?.subItems?.length || 0) === 0, '合并上下文后不应回退原始 subItems')
 
     const withAddedReason = addPackagingDraftReviewReason(draft)
     const updatedReason = updatePackagingDraftReviewReason(withAddedReason, 1, 'message', '新加的复核原因说明')
@@ -188,7 +188,7 @@ async function main() {
     const payloadWithoutReasons = buildPackagingCorrectedParamsPayload(clearedReasons)
     const mergedWithoutReasons = mergeReflectionPackagingContext(baseOriginalExtractedParams, payloadWithoutReasons)
     assert(payloadWithoutReasons.packagingContext.reviewReasons.length === 0, 'payload 应保留空 reviewReasons 数组')
-    assert((mergedWithoutReasons?.reviewReasons.length || 0) === 0, '合并上下文后不应回退原始 reviewReasons')
+    assert((mergedWithoutReasons?.reviewReasons?.length || 0) === 0, '合并上下文后不应回退原始 reviewReasons')
   })
 
   await test('非包装 reflection issueType 不应生成包装模板', () => {

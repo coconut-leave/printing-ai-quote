@@ -34,7 +34,7 @@ interface TestResult {
 
 const results: TestResult[] = []
 
-function assert(condition: boolean, message: string) {
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message)
   }
@@ -65,14 +65,10 @@ function setFileHint(reflectionId: number, createdAt: Date, fileHint: string) {
   setImprovementTargetFileHint(generateImprovementId(reflectionId, createdAt), fileHint)
 }
 
-function pickCampaignSeedItems(params: {
+function pickCampaignSeedItems<T extends { id: string; createdAt: string; governanceTheme: string }>(params: {
   governanceTheme: string
   count: number
-  actionDrafts: Array<{
-    id: string
-    createdAt: string
-    governanceTheme: string
-  }>
+  actionDrafts: T[]
 }) {
   const selected = params.actionDrafts
     .filter((item) => item.governanceTheme === params.governanceTheme)

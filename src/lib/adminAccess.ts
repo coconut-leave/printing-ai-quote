@@ -5,6 +5,7 @@ export const PROTECTED_ADMIN_PAGE_PREFIXES = [
   '/conversations',
   '/dashboard',
   '/learning-dashboard',
+  '/trial-reviews',
   '/reflections',
   '/improvements',
   '/actions',
@@ -15,6 +16,7 @@ export const PROTECTED_ADMIN_API_PREFIXES = [
   '/api/conversations',
   '/api/dashboard',
   '/api/learning-dashboard',
+  '/api/trial-reviews',
   '/api/quotes',
   '/api/reflections',
   '/api/improvements',
@@ -102,6 +104,29 @@ export function getUnauthorizedAdminMessage(): string {
   return '后台访问需要授权。请先通过 /admin-access 建立后台访问会话，或在脚本请求中传入 x-admin-secret。'
 }
 
+export function shouldUseSecureAdminCookie(params?: {
+  requestProtocol?: string | null
+  forwardedProto?: string | null
+  hostname?: string | null
+}): boolean {
+  const forwardedProto = params?.forwardedProto?.split(',')[0]?.trim().toLowerCase()
+  if (forwardedProto) {
+    return forwardedProto === 'https'
+  }
+
+  const requestProtocol = params?.requestProtocol?.replace(':', '').trim().toLowerCase()
+  if (requestProtocol) {
+    return requestProtocol === 'https'
+  }
+
+  const hostname = params?.hostname?.trim().toLowerCase()
+  if (hostname && ['localhost', '127.0.0.1', '::1'].includes(hostname)) {
+    return false
+  }
+
+  return isProductionEnvironment()
+}
+
 export async function createAdminSessionToken(secret: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret))
   return Array.from(new Uint8Array(digest))
@@ -130,11 +155,13 @@ export async function hasValidAdminAccess(params: {
   return params.sessionToken === await createAdminSessionToken(adminSecret)
 }
 
-export function getAdminSessionCookieOptions() {
+export function getAdminSessionCookieOptions(params?: {
+  secure?: boolean
+}) {
   return {
     httpOnly: true,
     sameSite: 'lax' as const,
-    secure: isProductionEnvironment(),
+    secure: params?.secure ?? isProductionEnvironment(),
     path: '/',
     maxAge: 60 * 60 * 8,
   }

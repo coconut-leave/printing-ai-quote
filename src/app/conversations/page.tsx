@@ -19,6 +19,9 @@ type ConversationItem = {
   topicSummary: string
   scopeLabel: string
   isActiveScope: boolean
+  trialReviewStatus: string | null
+  trialReviewStatusLabel: string | null
+  trialReviewLatestActionLabel: string | null
 }
 
 export default function ConversationsPage() {
@@ -112,7 +115,7 @@ export default function ConversationsPage() {
           </h1>
           <div className='flex gap-2'>
             <Link href='/reflections' className='rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50'>
-              查看反思记录
+              查看学习记录
             </Link>
             <Link href='/learning-dashboard' className='rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50'>
               查看学习看板
@@ -238,7 +241,7 @@ export default function ConversationsPage() {
                     {c.title}
                   </Link>
                   <div className='mt-1 text-sm text-slate-600'>{c.topicSummary}</div>
-                  <div className='mt-1 text-xs text-slate-500'>点击进入详情，可继续查看参数、报价和反思记录。</div>
+                  <div className='mt-1 text-xs text-slate-500'>点击进入详情，可继续查看参数、报价、当前订单打回留痕和学习记录。</div>
                 </div>
                 <div className='flex gap-2'>
                   <span className={`rounded px-2 py-1 text-xs font-medium ${
@@ -263,17 +266,31 @@ export default function ConversationsPage() {
                       当前可导出：{c.exportableResultStatus}
                     </span>
                   )}
+                  {c.trialReviewStatusLabel && (
+                    <span className='rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900'>
+                      试运行复核：{c.trialReviewStatusLabel}
+                    </span>
+                  )}
                 </div>
               </div>
               <p className='text-sm text-gray-500'>创建: {new Date(c.createdAt).toLocaleString()}</p>
               <p className='text-sm text-gray-500'>更新时间: {new Date(c.updatedAt).toLocaleString()}</p>
               <p className='mt-2 text-sm'>最近一条消息：{c.latestMessage || '暂无'}</p>
+              {c.trialReviewLatestActionLabel && (
+                <p className='mt-1 text-sm text-slate-600'>最近复核动作：{c.trialReviewLatestActionLabel}</p>
+              )}
               <div className='mt-3 flex flex-wrap gap-2'>
                 <Link
                   href={`/conversations/${c.id}`}
                   className='rounded bg-blue-500 px-3 py-1 text-sm text-white hover:bg-blue-600'
                 >
-                  查看详情 / 新建反思记录
+                  查看详情 / 补学习记录
+                </Link>
+                <Link
+                  href='/trial-reviews'
+                  className='rounded border border-amber-300 bg-amber-50 px-3 py-1 text-sm text-amber-900 hover:bg-amber-100'
+                >
+                  查看试运行复核队列
                 </Link>
                 {c.hasExportableResult && (
                   <a

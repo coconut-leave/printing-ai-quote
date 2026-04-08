@@ -74,6 +74,40 @@ export type ConversationDetailPayload = {
     status: 'NEW' | 'REVIEWED' | 'APPROVED' | 'REJECTED'
     createdAt: string
   }>
+  trialReviewCase: {
+    id: number
+    status: string
+    sourceKind: string
+    queueReason: string
+    queueReasonCode: string | null
+    deliveryScopeLabel: string | null
+    deliveryScopeNote: string | null
+    currentQuoteStatusLabel: string | null
+    requiresHumanReview: boolean
+    operatorName: string | null
+    lastActionNote: string | null
+    manualConfirmationResult: string | null
+    rejectionReason: string | null
+    rejectionCategory: string | null
+    rejectionTargetArea: string | null
+    calibrationSignal: string | null
+    driftSourceCandidate: string | null
+    driftDirection: string | null
+    contextSnapshot: Record<string, any> | null
+    manualConfirmedAt: string | null
+    closedAt: string | null
+    createdAt: string
+    updatedAt: string
+    auditLogs: Array<{
+      id: number
+      fromStatus: string | null
+      toStatus: string
+      actionType: string
+      operatorName: string | null
+      note: string | null
+      createdAt: string
+    }>
+  } | null
 }
 
 export function normalizeConversationDetailPayload(input: unknown): ConversationDetailPayload | null {
@@ -145,5 +179,51 @@ export function normalizeConversationDetailPayload(input: unknown): Conversation
           }
         })
       : [],
+    trialReviewCase: (() => {
+      const trialReviewRecord = asRecord(record.trialReviewCase)
+      if (!trialReviewRecord) {
+        return null
+      }
+
+      return {
+        id: Number(trialReviewRecord.id || 0),
+        status: typeof trialReviewRecord.status === 'string' ? trialReviewRecord.status : 'PENDING_REVIEW',
+        sourceKind: typeof trialReviewRecord.sourceKind === 'string' ? trialReviewRecord.sourceKind : 'REFERENCE_QUOTE',
+        queueReason: typeof trialReviewRecord.queueReason === 'string' ? trialReviewRecord.queueReason : '',
+        queueReasonCode: typeof trialReviewRecord.queueReasonCode === 'string' ? trialReviewRecord.queueReasonCode : null,
+        deliveryScopeLabel: typeof trialReviewRecord.deliveryScopeLabel === 'string' ? trialReviewRecord.deliveryScopeLabel : null,
+        deliveryScopeNote: typeof trialReviewRecord.deliveryScopeNote === 'string' ? trialReviewRecord.deliveryScopeNote : null,
+        currentQuoteStatusLabel: typeof trialReviewRecord.currentQuoteStatusLabel === 'string' ? trialReviewRecord.currentQuoteStatusLabel : null,
+        requiresHumanReview: Boolean(trialReviewRecord.requiresHumanReview),
+        operatorName: typeof trialReviewRecord.operatorName === 'string' ? trialReviewRecord.operatorName : null,
+        lastActionNote: typeof trialReviewRecord.lastActionNote === 'string' ? trialReviewRecord.lastActionNote : null,
+        manualConfirmationResult: typeof trialReviewRecord.manualConfirmationResult === 'string' ? trialReviewRecord.manualConfirmationResult : null,
+        rejectionReason: typeof trialReviewRecord.rejectionReason === 'string' ? trialReviewRecord.rejectionReason : null,
+        rejectionCategory: typeof trialReviewRecord.rejectionCategory === 'string' ? trialReviewRecord.rejectionCategory : null,
+        rejectionTargetArea: typeof trialReviewRecord.rejectionTargetArea === 'string' ? trialReviewRecord.rejectionTargetArea : null,
+        calibrationSignal: typeof trialReviewRecord.calibrationSignal === 'string' ? trialReviewRecord.calibrationSignal : null,
+        driftSourceCandidate: typeof trialReviewRecord.driftSourceCandidate === 'string' ? trialReviewRecord.driftSourceCandidate : null,
+        driftDirection: typeof trialReviewRecord.driftDirection === 'string' ? trialReviewRecord.driftDirection : null,
+        contextSnapshot: asRecord(trialReviewRecord.contextSnapshot) || null,
+        manualConfirmedAt: trialReviewRecord.manualConfirmedAt ? normalizeDateString(trialReviewRecord.manualConfirmedAt) : null,
+        closedAt: trialReviewRecord.closedAt ? normalizeDateString(trialReviewRecord.closedAt) : null,
+        createdAt: normalizeDateString(trialReviewRecord.createdAt),
+        updatedAt: normalizeDateString(trialReviewRecord.updatedAt),
+        auditLogs: Array.isArray(trialReviewRecord.auditLogs)
+          ? trialReviewRecord.auditLogs.map((audit) => {
+              const auditRecord = asRecord(audit) || {}
+              return {
+                id: Number(auditRecord.id || 0),
+                fromStatus: typeof auditRecord.fromStatus === 'string' ? auditRecord.fromStatus : null,
+                toStatus: typeof auditRecord.toStatus === 'string' ? auditRecord.toStatus : 'PENDING_REVIEW',
+                actionType: typeof auditRecord.actionType === 'string' ? auditRecord.actionType : 'QUEUED',
+                operatorName: typeof auditRecord.operatorName === 'string' ? auditRecord.operatorName : null,
+                note: typeof auditRecord.note === 'string' ? auditRecord.note : null,
+                createdAt: normalizeDateString(auditRecord.createdAt),
+              }
+            })
+          : [],
+      }
+    })(),
   }
 }

@@ -68,6 +68,18 @@ const PRODUCT_CATEGORY_DEFINITIONS: Record<ProductType, ProductCategoryDefinitio
     name: 'Seal Sticker',
     description: 'Phase-one complex packaging seal sticker category',
   },
+  foil_bag: {
+    productType: 'foil_bag',
+    slug: 'foil-bag',
+    name: 'Foil Bag',
+    description: 'Phase-2.5 complex packaging foil bag category',
+  },
+  carton_packaging: {
+    productType: 'carton_packaging',
+    slug: 'carton-packaging',
+    name: 'Carton Packaging',
+    description: 'Phase-2.5 complex packaging carton packaging category',
+  },
 }
 
 const LEGACY_PRODUCT_CATEGORY_MATCHES: Record<ProductType, { slugs: string[]; names: string[] }> = {
@@ -110,6 +122,14 @@ const LEGACY_PRODUCT_CATEGORY_MATCHES: Record<ProductType, { slugs: string[]; na
   seal_sticker: {
     slugs: ['seal_sticker'],
     names: ['Seal Sticker', 'seal_sticker'],
+  },
+  foil_bag: {
+    slugs: ['foil_bag'],
+    names: ['Foil Bag', 'foil_bag'],
+  },
+  carton_packaging: {
+    slugs: ['carton_packaging'],
+    names: ['Carton Packaging', 'carton_packaging'],
   },
 }
 

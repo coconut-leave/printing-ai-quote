@@ -1,9 +1,14 @@
 import { NextResponse } from 'next/server'
 import { listConversations } from '@/server/db/conversations'
 import { withErrorHandler } from '@/server/api/response'
-import { buildConversationPresentation, getConversationStatusLabel } from '@/lib/admin/presentation'
+import {
+  buildConversationPresentation,
+  getConversationStatusLabel,
+  getTrialReviewActionLabel,
+  getTrialReviewStatusLabel,
+} from '@/lib/admin/presentation'
 import { buildConversationUpdatedAtWhere, resolveConversationTimeFilter } from '@/lib/admin/conversationTimeFilters'
-import { getLatestExportableQuoteSnapshot } from '@/server/export/quoteExcel'
+import { getLatestExportableQuoteSnapshot, isDeliverableQuoteSnapshot } from '@/server/export/quoteExcel'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,6 +51,9 @@ export async function GET(request: Request) {
         messages: c.messages,
         quotes: c.quotes,
       })
+      const deliverableSnapshot = exportableSnapshot && isDeliverableQuoteSnapshot(exportableSnapshot)
+      const trialReviewCase = c.trialReviewCase
+      const latestTrialAudit = trialReviewCase?.auditLogs?.[0]
 
       return {
         id: c.id,
@@ -59,8 +67,11 @@ export async function GET(request: Request) {
         topicSummary: presentation.topicSummary,
         scopeLabel: presentation.scopeLabel,
         isActiveScope: presentation.isActiveScope,
-        hasExportableResult: Boolean(exportableSnapshot),
-        exportableResultStatus: exportableSnapshot?.quoteStatusLabel || null,
+        hasExportableResult: Boolean(deliverableSnapshot),
+        exportableResultStatus: deliverableSnapshot ? exportableSnapshot?.quoteStatusLabel || null : null,
+        trialReviewStatus: trialReviewCase?.status || null,
+        trialReviewStatusLabel: trialReviewCase ? getTrialReviewStatusLabel(trialReviewCase.status) : null,
+        trialReviewLatestActionLabel: latestTrialAudit ? getTrialReviewActionLabel(latestTrialAudit.actionType) : null,
       }
     })
 

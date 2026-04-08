@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server'
 import { getConversationWithDetails } from '@/server/db/conversations'
 import { createErrorResponse, withErrorHandler, ErrorCode } from '@/server/api/response'
-import { buildSingleQuoteWorkbook, getLatestExportableQuoteSnapshot } from '@/server/export/quoteExcel'
+import {
+  buildSingleQuoteWorkbook,
+  getLatestExportableQuoteSnapshot,
+  getQuoteSnapshotDeliveryBlockMessage,
+  isDeliverableQuoteSnapshot,
+} from '@/server/export/quoteExcel'
 
 function buildWorkbookResponse(buffer: Buffer, fileName: string) {
   return new NextResponse(new Uint8Array(buffer), {
@@ -30,6 +35,14 @@ export async function GET(_request: Request, { params }: { params: { id: string 
     const snapshot = getLatestExportableQuoteSnapshot(conversation)
     if (!snapshot) {
       return createErrorResponse('当前会话暂无可导出的报价结果', ErrorCode.NOT_FOUND, 404)
+    }
+
+    if (!isDeliverableQuoteSnapshot(snapshot)) {
+      return createErrorResponse(
+        getQuoteSnapshotDeliveryBlockMessage(snapshot),
+        ErrorCode.BAD_REQUEST,
+        409
+      )
     }
 
     return buildWorkbookResponse(

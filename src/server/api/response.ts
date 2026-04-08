@@ -1,5 +1,3 @@
-import { NextResponse } from 'next/server'
-
 // 统一错误响应格式
 export interface ApiErrorResponse {
   ok: false
@@ -14,6 +12,8 @@ export interface ApiSuccessResponse<T = any> {
   data?: T
   message?: string
 }
+
+export type ApiJsonResponse = Response
 
 // 错误代码枚举
 export enum ErrorCode {
@@ -68,8 +68,8 @@ export function createSuccessResponse<T = any>(
   data?: T,
   message?: string,
   status = 200
-): NextResponse<ApiSuccessResponse<T>> {
-  return NextResponse.json(
+): ApiJsonResponse {
+  return Response.json(
     {
       ok: true,
       ...(data !== undefined && { data }),
@@ -85,7 +85,7 @@ export function createErrorResponse(
   code?: ErrorCode,
   status = 500,
   includeRequestId = true
-): NextResponse<ApiErrorResponse> {
+): ApiJsonResponse {
   const response: ApiErrorResponse = {
     ok: false,
     error,
@@ -93,7 +93,7 @@ export function createErrorResponse(
     ...(includeRequestId && { requestId: generateRequestId() }),
   }
 
-  return NextResponse.json(response, { status })
+  return Response.json(response, { status })
 }
 
 // 将未知异常转换为安全错误消息
@@ -155,9 +155,9 @@ export function logWarn(message: string, context?: string, details?: unknown): v
 
 // 通用 API 路由错误处理包装器
 export async function withErrorHandler(
-  handler: () => Promise<NextResponse<any>>,
+  handler: () => Promise<Response>,
   context?: string
-): Promise<NextResponse<any>> {
+): Promise<Response> {
   try {
     return await handler()
   } catch (err) {

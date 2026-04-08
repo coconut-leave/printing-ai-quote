@@ -1,4 +1,4 @@
-import OpenAI from 'openai'
+import type OpenAI from 'openai'
 import { requireOpenAIKey } from '@/server/config/env'
 
 export type ExtractedQuoteParams = {
@@ -21,10 +21,11 @@ export type ExtractedQuoteParams = {
 
 let cachedOpenAIClient: OpenAI | null = null
 
-function getOpenAIClient(): OpenAI {
+async function getOpenAIClient(): Promise<OpenAI> {
   if (!cachedOpenAIClient) {
     const apiKey = requireOpenAIKey()
-    cachedOpenAIClient = new OpenAI({ apiKey })
+    const { default: OpenAIClient } = await import('openai')
+    cachedOpenAIClient = new OpenAIClient({ apiKey })
   }
   return cachedOpenAIClient
 }
@@ -439,7 +440,7 @@ export async function extractQuoteParams(userText: string): Promise<ExtractedQuo
 
 // 带超时的 OpenAI 调用
 async function callOpenAIWithTimeout(userText: string): Promise<ExtractedQuoteParams> {
-  const client = getOpenAIClient()
+  const client = await getOpenAIClient()
   const prompt = `Extract quote parameters from this user text and return ONLY valid JSON without any markdown, explanation, or additional text:
 "${userText}"
 

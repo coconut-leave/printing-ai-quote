@@ -14,7 +14,7 @@ interface TestResult {
 
 const results: TestResult[] = []
 
-function assert(condition: boolean, message: string) {
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message)
   }
@@ -50,8 +50,8 @@ async function initializeTestRuntime() {
     return
   }
 
-  const routeModule = await import('@/server/chat/createChatPostHandler')
-  const conversationModule = await import('@/server/db/conversations')
+  const routeModule = await import('@/server/chat/createChatPostHandler') as Record<string, any>
+  const conversationModule = await import('@/server/db/conversations') as Record<string, any>
 
   const createChatPostHandler = typeof routeModule.createChatPostHandler === 'function'
     ? routeModule.createChatPostHandler
@@ -101,7 +101,7 @@ async function getLatestAssistantMetadata(conversationId: string) {
   }
 
   const conversation = await getConversationWithDetailsFn(Number(conversationId))
-  const assistantMessages = conversation.messages.filter((message) => message.sender === 'ASSISTANT')
+  const assistantMessages = conversation.messages.filter((message: { sender: string }) => message.sender === 'ASSISTANT')
   return assistantMessages[assistantMessages.length - 1]?.metadata || null
 }
 
@@ -317,6 +317,24 @@ async function main() {
 
     assert(Boolean(findItem(withSticker, 'seal_sticker')), '后续轮次应能新增贴纸')
     assert(withSticker.estimatedData?.items?.length === 3, '新增贴纸后应有 3 个 item')
+  })
+
+  await test('已 quoted 的主件后续补入 generic 说明书时，不能借上下文直接放大成 quoted bundle', async () => {
+    const quoted = await sendChat!({
+      message: '双插盒，7*5*5CM，350克白卡，正反四色，5000个',
+    })
+
+    assert(quoted.status === 'quoted', '前置双插盒应先形成 quoted')
+
+    const addedGenericLeaflet = await sendChat!({
+      conversationId: quoted.conversationId,
+      message: '再加一个说明书，220x170mm，80g双胶纸，单面印',
+    })
+
+    assert(addedGenericLeaflet.status === 'estimated', '后续补入 generic 说明书时应继续 estimated')
+    assert(addedGenericLeaflet.conversationAction === 'add_sub_item', '新增 generic 说明书仍应标记 add_sub_item')
+    assert(addedGenericLeaflet.packagingReview?.trialBundleGateStatus === 'estimated_only_bundle_in_trial', 'generic 说明书 follow-up 应命中 estimated-only bundle gate')
+    assert(findItem(addedGenericLeaflet, 'leaflet_insert')?.normalizedParams?.quantity === 5000, 'generic 说明书仍应继承主件数量 5000')
   })
 
   await test('可以定向更新某个 subItem，而不会破坏其他组件', async () => {

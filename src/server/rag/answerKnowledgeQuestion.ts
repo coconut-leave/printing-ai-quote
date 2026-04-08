@@ -1,4 +1,4 @@
-import OpenAI from 'openai'
+import type OpenAI from 'openai'
 import { z } from 'zod'
 import { buildRagAnswerPrompt } from '@/server/ai/prompts/ragAnswer'
 import { buildRagQueryRewritePrompt } from '@/server/ai/prompts/ragQueryRewrite'
@@ -48,9 +48,10 @@ const KNOWLEDGE_FALLBACK_REPLY = '这个问题我先不乱回答，按我这边�
 
 let cachedOpenAIClient: OpenAI | null = null
 
-function getOpenAIClient(): OpenAI {
+async function getOpenAIClient(): Promise<OpenAI> {
   if (!cachedOpenAIClient) {
-    cachedOpenAIClient = new OpenAI({ apiKey: requireOpenAIKey() })
+    const { default: OpenAIClient } = await import('openai')
+    cachedOpenAIClient = new OpenAIClient({ apiKey: requireOpenAIKey() })
   }
   return cachedOpenAIClient
 }
@@ -100,7 +101,7 @@ function buildDeterministicAnswer(snippets: KnowledgeSnippet[]): string {
 }
 
 async function callModel(prompt: string, maxOutputTokens: number, timeoutMs: number): Promise<string> {
-  const client = getOpenAIClient()
+  const client = await getOpenAIClient()
   const response = await withTimeout(
     client.responses.create({
       model: 'gpt-4o-mini',

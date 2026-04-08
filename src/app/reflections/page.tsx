@@ -327,10 +327,10 @@ export default function ReflectionsPage() {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Reflection 审核
+            学习记录
           </h1>
           <p className="text-gray-600">
-            管理 AI 反思记录、审核建议、聚合优化信息
+            管理人工复盘留下的学习记录、处理建议和聚合优化信息
           </p>
         </div>
 
@@ -473,10 +473,10 @@ export default function ReflectionsPage() {
                     问题类型
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                    反思内容
+                    学习内容
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                    建议
+                    处理建议
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
                     当前状态

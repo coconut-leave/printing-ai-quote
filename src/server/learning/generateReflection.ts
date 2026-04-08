@@ -1,4 +1,4 @@
-import OpenAI from 'openai'
+import type OpenAI from 'openai'
 import { requireOpenAIKey } from '@/server/config/env'
 import {
   buildReflectionBusinessFeedbackSummary,
@@ -34,10 +34,11 @@ export type GenerateReflectionOutput = {
 
 let cachedOpenAIClient: OpenAI | null = null
 
-function getOpenAIClient(): OpenAI {
+async function getOpenAIClient(): Promise<OpenAI> {
   if (!cachedOpenAIClient) {
     const apiKey = requireOpenAIKey()
-    cachedOpenAIClient = new OpenAI({ apiKey })
+    const { default: OpenAIClient } = await import('openai')
+    cachedOpenAIClient = new OpenAIClient({ apiKey })
   }
   return cachedOpenAIClient
 }
@@ -165,7 +166,7 @@ function buildFallbackReflection(input: GenerateReflectionInput): GenerateReflec
 }
 
 async function generateByOpenAI(input: GenerateReflectionInput): Promise<GenerateReflectionOutput> {
-  const client = getOpenAIClient()
+  const client = await getOpenAIClient()
   const prompt = `你是打印报价系统的质检助理。请基于输入生成一条“反思记录”，仅用于人工审核，不可执行任何自动改价或自动改规则动作。
 
 输出必须是 JSON：

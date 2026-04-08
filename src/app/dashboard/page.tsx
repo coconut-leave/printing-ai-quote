@@ -231,7 +231,7 @@ export default function DashboardPage() {
         {!loading && stats && (
           <>
             <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-              当前窗口：{stats.period.label}。基于最近 {stats.sampledConversationCount} 个会话样本和当前反思记录聚合，同时对比上一等长周期，用于观察链路趋势，不替代详细后台页面。
+              当前窗口：{stats.period.label}。基于最近 {stats.sampledConversationCount} 个会话样本和当前学习记录聚合，同时对比上一等长周期，用于观察链路趋势，不替代详细后台页面。
             </div>
 
             <div className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
@@ -240,7 +240,7 @@ export default function DashboardPage() {
             </div>
 
             <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              学习区当前只有反思记录是数据库持久化的；改进建议和执行动作的状态、实施备注仍主要来自进程内存。
+              学习区当前只有学习记录是数据库持久化的；改进建议和执行动作的状态、实施备注仍主要来自进程内存。
               因此看板中的学习指标更适合演示和人工研判，不应当作正式长期台账或跨重启精确统计口径。
             </div>
 
@@ -469,8 +469,8 @@ export default function DashboardPage() {
               <div className="rounded-lg bg-white p-6 shadow">
                 <h2 className="mb-4 text-lg font-semibold text-gray-900">学习闭环概览</h2>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">反思记录总数</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.reflectionCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.reflectionCountDelta)}</div></div>
-                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">已通过反思记录</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.approvedReflectionCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.approvedReflectionCountDelta)}</div></div>
+                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">学习记录总数</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.reflectionCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.reflectionCountDelta)}</div></div>
+                  <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">已通过学习记录</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.approvedReflectionCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.approvedReflectionCountDelta)}</div></div>
                   <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">已采纳改进建议</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.acceptedImprovementCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.acceptedImprovementCountDelta)}</div></div>
                   <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">已落地执行动作</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.implementedActionCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.implementedActionCountDelta)}</div></div>
                   <div className="rounded border border-gray-100 p-3 text-sm"><div className="text-gray-600">已验证执行动作</div><div className="mt-1 text-xl font-bold text-gray-900">{stats.learningOverview.verifiedActionCount}</div><div className="mt-1 text-xs text-gray-500">{formatDelta(stats.learningTrend.verifiedActionCountDelta)}</div></div>

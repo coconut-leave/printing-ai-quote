@@ -1,4 +1,4 @@
-import { execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import path from 'path'
 
 interface ModuleResult {
@@ -24,6 +24,10 @@ const testModules = [
   { name: '首页推荐方案可视化回归测试', file: 'src/tests/home-demo-visualization.test.ts' },
   { name: '报价单 Excel 导出回归测试', file: 'src/tests/quote-excel-export.test.ts' },
   { name: '会话筛选与批量导出回归测试', file: 'src/tests/conversation-export-filters.test.ts' },
+  { name: '后台交付状态一致性回归测试', file: 'src/tests/delivery-admin-status-consistency.test.ts' },
+  { name: '试运行环境治理回归测试', file: 'src/tests/trial-env-governance.test.ts' },
+  { name: '试运行复核队列回归测试', file: 'src/tests/trial-review-queue.test.ts' },
+  { name: '试运行运行复盘回归测试', file: 'src/tests/pricing-trial-run-review.test.ts' },
   { name: '简单品类自动报价停用回归测试', file: 'src/tests/chat-api-simple-product-deactivation.test.ts' },
   { name: 'Chat API 上下文隔离与短路回归测试', file: 'src/tests/chat-api-context-isolation.test.ts' },
   { name: '轻量 Agent Router 与 RAG 回归测试', file: 'src/tests/agent-routing-rag.test.ts' },
@@ -50,12 +54,14 @@ console.log('║        MVP 回归测试套件                      ║')
 console.log('╚════════════════════════════════════════════╝')
 console.log('\n')
 
+const tsxCliPath = path.resolve(process.cwd(), 'node_modules/tsx/dist/cli.mjs')
+
 for (const module of testModules) {
   console.log(`📋 运行: ${module.name}...`)
   console.log('─'.repeat(50))
 
   try {
-    const output = execSync(`tsx ${module.file}`, {
+    const output = execFileSync(process.execPath, [tsxCliPath, module.file], {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
     })

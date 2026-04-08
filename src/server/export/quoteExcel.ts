@@ -1,6 +1,16 @@
 import * as XLSX from 'xlsx'
 import ExcelJS from 'exceljs'
-import { buildConversationPresentation, getProductTypeDisplayName } from '@/lib/admin/presentation'
+import {
+  buildConversationPresentation,
+  getProductTypeDisplayName,
+  getTrialReviewActionLabel,
+  getTrialReviewCalibrationSignalLabel,
+  getTrialReviewDriftDirectionLabel,
+  getTrialReviewRejectionCategoryLabel,
+  getTrialReviewSourceKindLabel,
+  getTrialReviewStatusLabel,
+  getTrialReviewTargetAreaLabel,
+} from '@/lib/admin/presentation'
 import { getDisplayParamEntries } from '@/lib/catalog/helpers'
 import {
   buildPackagingReviewSummaryFromQuoteRecord,
@@ -31,6 +41,32 @@ type ConversationMessageLike = {
   createdAt?: Date | string
 }
 
+type TrialReviewAuditLike = {
+  id?: number
+  actionType?: string
+  operatorName?: string | null
+  note?: string | null
+  createdAt?: Date | string
+}
+
+type TrialReviewCaseLike = {
+  id?: number
+  status?: string
+  sourceKind?: string
+  operatorName?: string | null
+  lastActionNote?: string | null
+  manualConfirmationResult?: string | null
+  rejectionReason?: string | null
+  rejectionCategory?: string | null
+  rejectionTargetArea?: string | null
+  calibrationSignal?: string | null
+  driftSourceCandidate?: string | null
+  driftDirection?: string | null
+  contextSnapshot?: unknown
+  updatedAt?: Date | string
+  auditLogs?: TrialReviewAuditLike[]
+}
+
 export type ConversationExportSource = {
   id: number
   status: string
@@ -40,9 +76,11 @@ export type ConversationExportSource = {
   updatedAt: Date | string
   messages?: ConversationMessageLike[]
   quotes?: QuoteLikeRecord[]
+  trialReviewCase?: TrialReviewCaseLike | null
 }
 
 export type ExportQuoteLineItem = {
+  roleLabel: '单项' | '主件' | '子项'
   productName: string
   spec: string
   materialColorProcess: string
@@ -52,7 +90,11 @@ export type ExportQuoteLineItem = {
   note: string
 }
 
+export type ExportQuoteDocumentKind = 'formal_quote' | 'reference_quote' | 'manual_review'
+
 export type ExportableQuoteSnapshot = {
+  documentKind: ExportQuoteDocumentKind
+  documentTitle: '正式报价单' | '参考报价单' | '人工处理提示'
   exportId: string
   quoteRecordId?: number
   conversationId: number
@@ -60,6 +102,8 @@ export type ExportableQuoteSnapshot = {
   customerName: string
   quotedAt: Date
   quoteStatusLabel: '正式报价' | '参考报价' | '转人工'
+  deliveryScopeLabel: string
+  deliveryScopeNote: string
   productName: string
   spec: string
   materialColorProcess: string
@@ -71,6 +115,11 @@ export type ExportableQuoteSnapshot = {
   finalPrice: number
   remark: string
   requiresHumanReview: boolean
+  trialReviewStatusLabel?: string | null
+  trialReviewSourceLabel?: string | null
+  trialReviewLatestActionLabel?: string | null
+  trialReviewOperatorName?: string | null
+  trialReviewUpdatedAt?: string | null
   lineItems: ExportQuoteLineItem[]
   sourceType: 'quote_record' | 'conversation_message'
 }
@@ -162,6 +211,17 @@ const MATERIAL_PROCESS_FIELD_SET = new Set([
   'processes',
 ])
 
+const COMPLEX_PACKAGING_PRODUCT_TYPES = new Set([
+  'mailer_box',
+  'tuck_end_box',
+  'window_box',
+  'leaflet_insert',
+  'box_insert',
+  'seal_sticker',
+  'foil_bag',
+  'carton_packaging',
+])
+
 function asRecord(value: unknown): JsonRecord | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : undefined
 }
@@ -178,6 +238,35 @@ function formatDateTime(value: Date | string): string {
   }
 
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
+}
+
+function buildTrialReviewExportContext(conversation: ConversationExportSource) {
+  const trialReviewCase = conversation.trialReviewCase
+  if (!trialReviewCase?.status) {
+    return null
+  }
+
+  const latestAudit = Array.isArray(trialReviewCase.auditLogs) ? trialReviewCase.auditLogs[0] : undefined
+  const updatedAt = trialReviewCase.updatedAt ? formatDateTime(trialReviewCase.updatedAt) : ''
+
+  return {
+    statusLabel: getTrialReviewStatusLabel(trialReviewCase.status),
+    sourceLabel: getTrialReviewSourceKindLabel(trialReviewCase.sourceKind || 'REFERENCE_QUOTE'),
+    latestActionLabel: latestAudit?.actionType ? getTrialReviewActionLabel(latestAudit.actionType) : null,
+    operatorName: trialReviewCase.operatorName || latestAudit?.operatorName || null,
+    updatedAt: updatedAt || null,
+    note: dedupeText([
+      trialReviewCase.manualConfirmationResult ? `人工确认结论：${trialReviewCase.manualConfirmationResult}` : null,
+      trialReviewCase.rejectionReason ? `打回原因：${trialReviewCase.rejectionReason}` : null,
+      trialReviewCase.rejectionCategory ? `打回分类：${getTrialReviewRejectionCategoryLabel(trialReviewCase.rejectionCategory)}` : null,
+      trialReviewCase.rejectionTargetArea ? `打回目标区段：${getTrialReviewTargetAreaLabel(trialReviewCase.rejectionTargetArea)}` : null,
+      trialReviewCase.calibrationSignal ? `Calibration 信号：${getTrialReviewCalibrationSignalLabel(trialReviewCase.calibrationSignal)}` : null,
+      trialReviewCase.driftSourceCandidate ? `疑似漂移源：${trialReviewCase.driftSourceCandidate}` : null,
+      trialReviewCase.driftDirection ? `同向漂移方向：${getTrialReviewDriftDirectionLabel(trialReviewCase.driftDirection)}` : null,
+      trialReviewCase.lastActionNote,
+      latestAudit?.note,
+    ]),
+  }
 }
 
 function formatDateStamp(value: Date | string): string {
@@ -289,8 +378,145 @@ function buildLineItemNote(summary: PackagingReviewLineItemView): string {
   ])
 }
 
+function buildLineItemRoleLabel(index: number, total: number): '单项' | '主件' | '子项' {
+  if (total <= 1) {
+    return '单项'
+  }
+
+  return index === 0 ? '主件' : '子项'
+}
+
+function buildDisplayProductName(item: ExportQuoteLineItem): string {
+  return item.roleLabel === '单项' ? item.productName : `${item.roleLabel}｜${item.productName}`
+}
+
+function isComplexPackagingProductType(productType?: string): boolean {
+  return Boolean(productType && COMPLEX_PACKAGING_PRODUCT_TYPES.has(productType))
+}
+
+function getDocumentTitle(documentKind: ExportQuoteDocumentKind): ExportableQuoteSnapshot['documentTitle'] {
+  if (documentKind === 'reference_quote') {
+    return '参考报价单'
+  }
+
+  if (documentKind === 'manual_review') {
+    return '人工处理提示'
+  }
+
+  return '正式报价单'
+}
+
+function getQuoteStatusLabel(documentKind: ExportQuoteDocumentKind): ExportableQuoteSnapshot['quoteStatusLabel'] {
+  if (documentKind === 'reference_quote') {
+    return '参考报价'
+  }
+
+  if (documentKind === 'manual_review') {
+    return '转人工'
+  }
+
+  return '正式报价'
+}
+
+function getDeliveryScopeLabel(documentKind: ExportQuoteDocumentKind, isTrialScoped: boolean): string {
+  if (documentKind === 'manual_review') {
+    return '人工处理范围'
+  }
+
+  if (!isTrialScoped) {
+    return documentKind === 'reference_quote' ? '参考报价交付' : '标准产品正式报价'
+  }
+
+  return documentKind === 'reference_quote' ? '试运行参考报价范围' : '试运行正式报价范围'
+}
+
+function getDocumentUsageLabel(documentKind: ExportQuoteDocumentKind): string {
+  if (documentKind === 'reference_quote') {
+    return '仅供方案沟通、试运行评估和人工确认前留档，不作为正式成交承诺。'
+  }
+
+  if (documentKind === 'manual_review') {
+    return '仅供内部人工处理使用，不对外发送。'
+  }
+
+  return '可直接作为正式对客报价与业务归档依据。'
+}
+
+function getLedgerArchiveLabel(documentKind: ExportQuoteDocumentKind): string {
+  if (documentKind === 'reference_quote') {
+    return '参考报价归档'
+  }
+
+  if (documentKind === 'manual_review') {
+    return '人工处理归档'
+  }
+
+  return '正式报价归档'
+}
+
+function buildDeliveryScopeNote(
+  documentKind: ExportQuoteDocumentKind,
+  packagingSummary: PackagingReviewSummaryView | null,
+  isTrialScoped: boolean,
+): string {
+  const defaultNote = documentKind === 'manual_review'
+    ? '当前路径属于人工处理范围，不生成正式或参考报价单，请转人工跟进。'
+    : documentKind === 'reference_quote'
+      ? '当前路径在试运行内仅提供参考报价，不作为正式成交承诺，请人工确认后再对外确认。'
+      : isTrialScoped
+        ? '当前路径属于试运行允许正式报价范围，可按正式报价单交付。'
+        : '当前路径已按标准产品正式报价口径整理，可直接作为正式报价单使用。'
+
+  return dedupeText([
+    packagingSummary?.statusReasonText,
+    defaultNote,
+  ])
+}
+
+function resolveSnapshotDocumentKind(input: {
+  sourceStatus: 'quoted' | 'estimated' | 'handoff_required'
+  packagingSummary: PackagingReviewSummaryView | null
+}): ExportQuoteDocumentKind {
+  const summary = input.packagingSummary
+
+  if (
+    summary?.status === 'handoff_required'
+    || summary?.trialGateStatus === 'handoff_only_in_trial'
+    || summary?.trialBundleGateStatus === 'handoff_only_bundle_in_trial'
+    || input.sourceStatus === 'handoff_required'
+  ) {
+    return 'manual_review'
+  }
+
+  if (
+    summary?.status === 'estimated'
+    || summary?.trialGateStatus === 'estimated_only_in_trial'
+    || summary?.trialBundleGateStatus === 'estimated_only_bundle_in_trial'
+    || input.sourceStatus === 'estimated'
+  ) {
+    return 'reference_quote'
+  }
+
+  return 'formal_quote'
+}
+
+function getDocumentPrefix(documentKind: ExportQuoteDocumentKind): 'BJ' | 'CK' | 'RG' {
+  if (documentKind === 'reference_quote') {
+    return 'CK'
+  }
+
+  if (documentKind === 'manual_review') {
+    return 'RG'
+  }
+
+  return 'BJ'
+}
+
 function buildLineItemsFromPackagingSummary(summary: PackagingReviewSummaryView): ExportQuoteLineItem[] {
-  return summary.lineItems.map((item) => ({
+  const total = summary.lineItems.length
+
+  return summary.lineItems.map((item, index) => ({
+    roleLabel: buildLineItemRoleLabel(index, total),
     productName: item.title,
     spec: item.normalizedSpecSummary,
     materialColorProcess: [item.materialWeightSummary, item.printColorSummary, item.processSummary].filter(Boolean).join('；'),
@@ -302,10 +528,14 @@ function buildLineItemsFromPackagingSummary(summary: PackagingReviewSummaryView)
 }
 
 function buildLineItemsFromRawPricingItems(items: unknown[]): ExportQuoteLineItem[] {
-  return items
+  const normalizedItems = items
     .map((item) => asRecord(item))
     .filter((item): item is JsonRecord => Boolean(item))
-    .map((item) => ({
+  const total = normalizedItems.length
+
+  return normalizedItems
+    .map((item, index) => ({
+      roleLabel: buildLineItemRoleLabel(index, total),
       productName: typeof item.title === 'string' && item.title.trim()
         ? item.title.trim()
         : getProductTypeDisplayName(typeof item.itemType === 'string' ? item.itemType : undefined),
@@ -340,6 +570,7 @@ function buildSingleLineItemFromParams(params: JsonRecord | undefined, pricingDe
       : 0
 
   return {
+    roleLabel: '单项',
     productName: getProductTypeDisplayName(productType),
     spec,
     materialColorProcess,
@@ -350,23 +581,38 @@ function buildSingleLineItemFromParams(params: JsonRecord | undefined, pricingDe
   }
 }
 
+function resolvePackagingSummaryForQuoteRecord(
+  quoteParameters: JsonRecord,
+  pricingDetails: JsonRecord,
+): PackagingReviewSummaryView | null {
+  const explicitSummary = normalizePackagingReviewSummaryView(pricingDetails.packagingReview)
+  if (explicitSummary) {
+    return explicitSummary
+  }
+
+  try {
+    return buildPackagingReviewSummaryFromQuoteRecord({
+      parameters: quoteParameters,
+      pricingDetails,
+    })
+  } catch {
+    return null
+  }
+}
+
 export function buildQuoteSnapshotFromQuoteRecord(params: {
   conversation: ConversationExportSource
   quote: QuoteLikeRecord
 }): ExportableQuoteSnapshot {
   const quoteParameters = asRecord(params.quote.parameters) || {}
   const pricingDetails = asRecord(params.quote.pricingDetails) || {}
-  let packagingSummary: PackagingReviewSummaryView | null = null
-
-  try {
-    packagingSummary = buildPackagingReviewSummaryFromQuoteRecord({
-      status: params.quote.status,
-      parameters: quoteParameters,
-      pricingDetails,
-    })
-  } catch {
-    packagingSummary = null
-  }
+  const productType = typeof quoteParameters.productType === 'string' ? quoteParameters.productType : undefined
+  const packagingSummary = resolvePackagingSummaryForQuoteRecord(quoteParameters, pricingDetails)
+  const documentKind = resolveSnapshotDocumentKind({
+    sourceStatus: 'quoted',
+    packagingSummary,
+  })
+  const isTrialScoped = isComplexPackagingProductType(productType) || Boolean(packagingSummary?.trialGateStatus || packagingSummary?.trialBundleGateStatus)
 
   const lineItems = packagingSummary?.lineItems.length
     ? buildLineItemsFromPackagingSummary(packagingSummary)
@@ -375,15 +621,20 @@ export function buildQuoteSnapshotFromQuoteRecord(params: {
       : [buildSingleLineItemFromParams(quoteParameters, pricingDetails)]
   const primaryLine = lineItems[0]
   const quotedAt = new Date(params.quote.createdAt)
+  const trialReviewContext = buildTrialReviewExportContext(params.conversation)
 
   return {
-    exportId: buildExportId('BJ', quotedAt, params.quote.id),
+    documentKind,
+    documentTitle: getDocumentTitle(documentKind),
+    exportId: buildExportId(getDocumentPrefix(documentKind), quotedAt, params.quote.id),
     quoteRecordId: params.quote.id,
     conversationId: params.conversation.id,
     conversationTitle: buildConversationTitle(params.conversation),
     customerName: params.conversation.customerName || '',
     quotedAt,
-    quoteStatusLabel: '正式报价',
+    quoteStatusLabel: getQuoteStatusLabel(documentKind),
+    deliveryScopeLabel: getDeliveryScopeLabel(documentKind, isTrialScoped),
+    deliveryScopeNote: buildDeliveryScopeNote(documentKind, packagingSummary, isTrialScoped),
     productName: lineItems.length > 1 ? `${primaryLine.productName}等${lineItems.length}项` : primaryLine.productName,
     spec: primaryLine.spec,
     materialColorProcess: primaryLine.materialColorProcess,
@@ -394,11 +645,19 @@ export function buildQuoteSnapshotFromQuoteRecord(params: {
     tax: formatMoney(params.quote.taxCents / 100),
     finalPrice: formatMoney(params.quote.totalCents / 100),
     remark: dedupeText([
+      trialReviewContext ? `试运行复核：${trialReviewContext.statusLabel}${trialReviewContext.latestActionLabel ? ` / ${trialReviewContext.latestActionLabel}` : ''}` : '',
+      trialReviewContext?.operatorName ? `处理人：${trialReviewContext.operatorName}` : '',
+      trialReviewContext?.note,
       packagingSummary?.conciseExplanation,
       ...(packagingSummary?.reviewReasons || []).map((reason) => reason.message),
       ...(Array.isArray(pricingDetails.notes) ? pricingDetails.notes.map((note) => String(note)) : []),
     ]),
     requiresHumanReview: Boolean(quoteParameters.requiresHumanReview || packagingSummary?.requiresHumanReview),
+    trialReviewStatusLabel: trialReviewContext?.statusLabel || null,
+    trialReviewSourceLabel: trialReviewContext?.sourceLabel || null,
+    trialReviewLatestActionLabel: trialReviewContext?.latestActionLabel || null,
+    trialReviewOperatorName: trialReviewContext?.operatorName || null,
+    trialReviewUpdatedAt: trialReviewContext?.updatedAt || null,
     lineItems,
     sourceType: 'quote_record',
   }
@@ -427,6 +686,12 @@ export function buildQuoteSnapshotFromConversationMessage(params: {
     || asRecord(pricingPayload?.normalizedParams)
     || undefined
   const packagingSummary = normalizePackagingReviewSummaryView(metadata.packagingReview)
+  const productType = typeof quoteParams?.productType === 'string' ? quoteParams.productType : undefined
+  const documentKind = resolveSnapshotDocumentKind({
+    sourceStatus: responseStatus as 'quoted' | 'estimated' | 'handoff_required',
+    packagingSummary,
+  })
+  const isTrialScoped = isComplexPackagingProductType(productType) || Boolean(packagingSummary?.trialGateStatus || packagingSummary?.trialBundleGateStatus)
   const lineItems = packagingSummary?.lineItems.length
     ? buildLineItemsFromPackagingSummary(packagingSummary)
     : quoteParams
@@ -439,19 +704,19 @@ export function buildQuoteSnapshotFromConversationMessage(params: {
 
   const primaryLine = lineItems[0]
   const createdAt = new Date(params.message.createdAt || params.conversation.updatedAt)
-  const quoteStatusLabel = responseStatus === 'estimated'
-    ? '参考报价'
-    : responseStatus === 'quoted'
-      ? '正式报价'
-      : '转人工'
+  const trialReviewContext = buildTrialReviewExportContext(params.conversation)
 
   return {
-    exportId: buildExportId(responseStatus === 'estimated' ? 'CK' : responseStatus === 'quoted' ? 'BJ' : 'RG', createdAt, params.conversation.id),
+    documentKind,
+    documentTitle: getDocumentTitle(documentKind),
+    exportId: buildExportId(getDocumentPrefix(documentKind), createdAt, params.conversation.id),
     conversationId: params.conversation.id,
     conversationTitle: buildConversationTitle(params.conversation),
     customerName: params.conversation.customerName || '',
     quotedAt: createdAt,
-    quoteStatusLabel,
+    quoteStatusLabel: getQuoteStatusLabel(documentKind),
+    deliveryScopeLabel: getDeliveryScopeLabel(documentKind, isTrialScoped),
+    deliveryScopeNote: buildDeliveryScopeNote(documentKind, packagingSummary, isTrialScoped),
     productName: lineItems.length > 1 ? `${primaryLine.productName}等${lineItems.length}项` : primaryLine.productName,
     spec: primaryLine.spec,
     materialColorProcess: primaryLine.materialColorProcess,
@@ -462,14 +727,30 @@ export function buildQuoteSnapshotFromConversationMessage(params: {
     tax: formatMoney(asNumber(pricingPayload?.tax)),
     finalPrice: formatMoney(asNumber(pricingPayload?.finalPrice ?? packagingSummary?.finalPrice)),
     remark: dedupeText([
+      trialReviewContext ? `试运行复核：${trialReviewContext.statusLabel}${trialReviewContext.latestActionLabel ? ` / ${trialReviewContext.latestActionLabel}` : ''}` : '',
+      trialReviewContext?.operatorName ? `处理人：${trialReviewContext.operatorName}` : '',
+      trialReviewContext?.note,
       packagingSummary?.conciseExplanation,
       ...(packagingSummary?.reviewReasons || []).map((reason) => reason.message),
       typeof params.message.content === 'string' ? params.message.content : '',
     ]),
     requiresHumanReview: Boolean(metadata.requiresHumanReview || packagingSummary?.requiresHumanReview),
+    trialReviewStatusLabel: trialReviewContext?.statusLabel || null,
+    trialReviewSourceLabel: trialReviewContext?.sourceLabel || null,
+    trialReviewLatestActionLabel: trialReviewContext?.latestActionLabel || null,
+    trialReviewOperatorName: trialReviewContext?.operatorName || null,
+    trialReviewUpdatedAt: trialReviewContext?.updatedAt || null,
     lineItems,
     sourceType: 'conversation_message',
   }
+}
+
+export function isDeliverableQuoteSnapshot(snapshot: ExportableQuoteSnapshot): boolean {
+  return snapshot.documentKind !== 'manual_review'
+}
+
+export function getQuoteSnapshotDeliveryBlockMessage(snapshot: ExportableQuoteSnapshot): string {
+  return snapshot.deliveryScopeNote || '当前路径属于人工处理范围，不生成正式或参考报价单，请转人工跟进。'
 }
 
 function getLatestExportableMessage(conversation: ConversationExportSource): ConversationMessageLike | null {
@@ -517,29 +798,53 @@ export function buildLedgerRows(snapshots: ExportableQuoteSnapshot[]) {
     '报价日期': formatDateTime(snapshot.quotedAt),
     '会话编号': snapshot.conversationId,
     '报价单号': snapshot.exportId,
+    '单据类型': snapshot.documentTitle,
+    '业务归档分类': getLedgerArchiveLabel(snapshot.documentKind),
     '客户名称': snapshot.customerName,
-    '品名': item.productName,
+    '品名': buildDisplayProductName(item),
     '规格': item.spec,
     '材质+颜色+工艺': item.materialColorProcess,
     '数量': item.quantity,
     '单价': item.unitPrice,
     '金额': item.subtotal,
     '报价状态': snapshot.quoteStatusLabel,
+    '试运行口径': snapshot.deliveryScopeLabel,
+    '对外使用建议': getDocumentUsageLabel(snapshot.documentKind),
+    '复核状态': snapshot.trialReviewStatusLabel || '暂无复核留痕',
+    '复核流转': dedupeText([
+      snapshot.trialReviewStatusLabel,
+      snapshot.trialReviewLatestActionLabel,
+    ]),
+    '复核来源': snapshot.trialReviewSourceLabel || '',
+    '复核人': snapshot.trialReviewOperatorName || '',
+    '复核更新时间': snapshot.trialReviewUpdatedAt || '',
     '是否人工复核': snapshot.requiresHumanReview ? '是' : '否',
     '来源会话主题': snapshot.conversationTitle,
-    '备注': dedupeText([snapshot.remark, item.note]),
+    '备注': dedupeText([snapshot.deliveryScopeNote, snapshot.remark, item.note]),
   })))
 }
 
 function buildQuoteBreakdownRows(snapshot: ExportableQuoteSnapshot): QuoteBreakdownRow[] {
   const rows = snapshot.lineItems.map((item) => ({
-    project: item.productName,
+    project: buildDisplayProductName(item),
     detail: dedupeText([item.spec, item.materialColorProcess]),
     quantity: formatQuantityText(item.quantity),
     unitPrice: formatUnitPriceText(item.unitPrice),
     amount: formatMoneyText(item.subtotal),
-    note: item.note,
+    note: dedupeText([
+      item.roleLabel === '主件' ? '组合主件' : item.roleLabel === '子项' ? '组合子项' : '',
+      item.note,
+    ]),
   }))
+
+  rows.push({
+    project: '产品小计',
+    detail: snapshot.lineItems.length > 1 ? '主件与子项金额合计' : '当前产品金额',
+    quantity: '',
+    unitPrice: '',
+    amount: formatMoneyText(snapshot.subtotal),
+    note: '订单级产品小计',
+  })
 
   if (snapshot.shippingFee > 0) {
     rows.push({
@@ -577,8 +882,17 @@ function buildQuoteBreakdownRows(snapshot: ExportableQuoteSnapshot): QuoteBreakd
 
 function buildQuoteRemark(snapshot: ExportableQuoteSnapshot): string {
   return dedupeText([
+    snapshot.deliveryScopeNote,
+    `对外使用：${getDocumentUsageLabel(snapshot.documentKind)}`,
+    snapshot.trialReviewStatusLabel ? `试运行复核：${snapshot.trialReviewStatusLabel}` : '',
+    snapshot.trialReviewLatestActionLabel ? `最近复核动作：${snapshot.trialReviewLatestActionLabel}` : '',
+    snapshot.trialReviewOperatorName ? `处理人：${snapshot.trialReviewOperatorName}` : '',
     snapshot.remark,
-    snapshot.requiresHumanReview ? '当前报价含需人工复核项，请结合业务确认。' : '以上报价基于当前确认参数整理。',
+    snapshot.documentKind === 'reference_quote'
+      ? '当前单据为参考报价单，仅供方案沟通、试运行评估和人工确认前留档使用。'
+      : snapshot.requiresHumanReview
+        ? '当前报价含需人工复核项，请结合业务确认。'
+        : '以上报价基于当前确认参数整理。',
   ]) || '以上报价基于当前确认参数整理，如尺寸、材质、工艺或交期调整，请重新核价。'
 }
 
@@ -623,7 +937,7 @@ function mergeAndStyle(
 
 function buildPreviewItemRows(snapshot: ExportableQuoteSnapshot) {
   return snapshot.lineItems.map((item) => ({
-    productName: item.productName,
+    productName: buildDisplayProductName(item),
     spec: item.spec || '-',
     process: item.materialColorProcess || '-',
     quantity: formatQuantityText(item.quantity),
@@ -662,7 +976,7 @@ export function renderSingleQuotePreviewHtml(snapshot: ExportableQuoteSnapshot):
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(snapshot.exportId)} 报价单</title>
+    <title>${escapeHtml(snapshot.exportId)} ${escapeHtml(snapshot.documentTitle)}</title>
     <style>
       :root {
         --line: #161616;
@@ -843,12 +1157,15 @@ export function renderSingleQuotePreviewHtml(snapshot: ExportableQuoteSnapshot):
           <p>${escapeHtml(QUOTE_COMPANY_PROFILE.address)} ${escapeHtml(QUOTE_COMPANY_PROFILE.phone)} ${escapeHtml(QUOTE_COMPANY_PROFILE.fax)}</p>
           <p>${escapeHtml(QUOTE_COMPANY_PROFILE.email)} ${escapeHtml(QUOTE_COMPANY_PROFILE.contact)} ${escapeHtml(QUOTE_COMPANY_PROFILE.mobile)} ${escapeHtml(QUOTE_COMPANY_PROFILE.wechat)}</p>
         </div>
-        <div class="title">报价单</div>
+        <div class="title">${escapeHtml(snapshot.documentTitle)}</div>
         <dl class="meta">
           <dt>客户</dt><dd>${escapeHtml(snapshot.customerName || '待补充')}</dd>
           <dt>报价日期</dt><dd>${escapeHtml(formatBusinessDate(snapshot.quotedAt))}</dd>
           <dt>报价单号</dt><dd>${escapeHtml(snapshot.exportId)}</dd>
           <dt>报价状态</dt><dd>${escapeHtml(snapshot.quoteStatusLabel)}</dd>
+          <dt>试运行口径</dt><dd>${escapeHtml(snapshot.deliveryScopeLabel)}</dd>
+          <dt>对外使用</dt><dd>${escapeHtml(getDocumentUsageLabel(snapshot.documentKind))}</dd>
+          <dt>试运行复核</dt><dd>${escapeHtml(snapshot.trialReviewStatusLabel || '暂无复核留痕')}</dd>
           <dt>人工复核</dt><dd>${snapshot.requiresHumanReview ? '需要' : '无需'}</dd>
           <dt>主报价项</dt><dd>${escapeHtml(snapshot.productName)}</dd>
         </dl>
@@ -902,7 +1219,7 @@ export function renderSingleQuotePreviewHtml(snapshot: ExportableQuoteSnapshot):
         </table>
       </section>
 
-      <div class="footer-note">本页为报价单在线预览版，版式参考实际业务报价单整理。若客户要求变更尺寸、材质、工艺、交期或交货地点，请重新核价后再确认。</div>
+      <div class="footer-note">${escapeHtml(snapshot.deliveryScopeNote)} 若客户要求变更尺寸、材质、工艺、交期或交货地点，请重新核价后再确认。</div>
 
       <div class="actions">
         <button onclick="window.print()">打印此页</button>
@@ -969,7 +1286,7 @@ export async function buildSingleQuoteWorkbook(snapshot: ExportableQuoteSnapshot
     font: { name: 'Microsoft YaHei', size: 18, bold: true },
     alignment: { vertical: 'middle', horizontal: 'left' },
   })
-  mergeAndStyle(worksheet, 1, 7, 1, 8, '报价单', {
+  mergeAndStyle(worksheet, 1, 7, 1, 8, snapshot.documentTitle, {
     font: { name: 'Microsoft YaHei', size: 20, bold: true },
     alignment: { vertical: 'middle', horizontal: 'center' },
     fill: EXCEL_TITLE_FILL,
@@ -1044,12 +1361,12 @@ export async function buildSingleQuoteWorkbook(snapshot: ExportableQuoteSnapshot
     font: { name: 'Microsoft YaHei', size: 10 },
     alignment: { vertical: 'middle', horizontal: 'center' },
   })
-  mergeAndStyle(worksheet, 4, 14, 4, 15, '人工复核', {
+  mergeAndStyle(worksheet, 4, 14, 4, 15, '试运行口径', {
     font: { name: 'Microsoft YaHei', size: 10, bold: true },
     alignment: { vertical: 'middle', horizontal: 'center' },
     fill: EXCEL_HEADER_FILL,
   })
-  mergeAndStyle(worksheet, 4, 16, 4, 18, snapshot.requiresHumanReview ? '需要' : '无需', {
+  mergeAndStyle(worksheet, 4, 16, 4, 18, snapshot.deliveryScopeLabel, {
     font: { name: 'Microsoft YaHei', size: 10 },
     alignment: { vertical: 'middle', horizontal: 'center' },
   })
@@ -1220,7 +1537,7 @@ export async function buildSingleQuoteWorkbook(snapshot: ExportableQuoteSnapshot
     10,
     summaryEndRow,
     18,
-    '本报价单按当前确认参数整理。若客户变更尺寸、材质、工艺、数量、交期或交货地点，请重新核价；如为参考报价或含人工复核项，请以业务最终确认版本为准。',
+    `对外使用：${getDocumentUsageLabel(snapshot.documentKind)} ${snapshot.deliveryScopeNote} 若客户变更尺寸、材质、工艺、数量、交期或交货地点，请重新核价；如含人工复核项，请以业务最终确认版本为准。`,
     {
       font: { name: 'Microsoft YaHei', size: 10 },
       alignment: { vertical: 'top', horizontal: 'left', wrapText: true },
@@ -1248,14 +1565,24 @@ export function buildLedgerWorkbook(snapshots: ExportableQuoteSnapshot[]): Buffe
     { wch: 20 },
     { wch: 10 },
     { wch: 18 },
+    { wch: 14 },
     { wch: 16 },
     { wch: 16 },
+    { wch: 18 },
     { wch: 28 },
     { wch: 32 },
     { wch: 10 },
     { wch: 12 },
     { wch: 14 },
     { wch: 12 },
+    { wch: 16 },
+    { wch: 32 },
+    { wch: 12 },
+    { wch: 18 },
+    { wch: 26 },
+    { wch: 16 },
+    { wch: 18 },
+    { wch: 32 },
     { wch: 12 },
     { wch: 26 },
     { wch: 32 },

@@ -169,6 +169,8 @@ export function resolveGovernanceActor(params: {
   return buildLegacyGovernanceActor('governance-dashboard')
 }
 
-export function getAdminActorCookieOptions() {
-  return getAdminSessionCookieOptions()
+export function getAdminActorCookieOptions(params?: {
+  secure?: boolean
+}) {
+  return getAdminSessionCookieOptions(params)
 }

@@ -402,6 +402,7 @@ export default function Home() {
                 </div>
                 <div className='text-right text-sm text-slate-700'>
                   <div>数量：{item.quantity}</div>
+                  {item.chargeQuantity && item.chargeQuantity !== item.quantity && <div>计费数：{item.chargeQuantity}</div>}
                   <div>单价：¥{item.unitPrice}</div>
                   <div>小计：¥{item.lineTotal}</div>
                 </div>
@@ -410,7 +411,7 @@ export default function Home() {
                 <div>材质 / 克重：{item.materialWeightSummary}</div>
                 <div>印色：{item.printColorSummary}</div>
                 <div>工艺：{item.processSummary}</div>
-                <div>开机费：¥{item.setupCost} / 运行费：¥{item.runCost}</div>
+                <div>开机费：¥{item.setupCost} / 运行费：¥{item.runCost}{typeof item.costSubtotal === 'number' ? ` / 成本小计：¥${item.costSubtotal}` : ''}</div>
               </div>
               {(item.reviewReasons.length > 0 || item.reviewFlags.length > 0) && (
                 <div className='mt-3 rounded bg-amber-100 px-3 py-2 text-sm text-amber-900'>

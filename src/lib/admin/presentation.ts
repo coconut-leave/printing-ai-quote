@@ -212,6 +212,113 @@ export function getReflectionRecordStatusLabel(status: string): string {
   return map[status] || status
 }
 
+export function getTrialReviewStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    PENDING_REVIEW: '待复核',
+    MANUAL_CONFIRMED: '已人工确认',
+    RETURNED_AS_ESTIMATE: '保留参考报价',
+    HANDOFF_TO_HUMAN: '已转人工',
+    CLOSED: '已关闭',
+  }
+
+  return map[status] || status
+}
+
+export function getTrialReviewStatusTransitionLabel(fromStatus: string | null | undefined, toStatus: string): string {
+  const toLabel = getTrialReviewStatusLabel(toStatus)
+  if (!fromStatus) {
+    return `新进入${toLabel}`
+  }
+
+  return `${getTrialReviewStatusLabel(fromStatus)} -> ${toLabel}`
+}
+
+export function getTrialReviewSourceKindLabel(sourceKind: string): string {
+  const map: Record<string, string> = {
+    REFERENCE_QUOTE: '参考报价复核',
+    MANUAL_REVIEW: '人工处理判断',
+    HUMAN_FOLLOWUP: '人工跟进中',
+    QUOTED_FEEDBACK: '正式报价反馈',
+  }
+
+  return map[sourceKind] || sourceKind
+}
+
+export function getTrialReviewManualConfirmationResultLabel(result: string | null | undefined): string {
+  const map: Record<string, string> = {
+    CONFIRMED_AS_QUOTED: '确认沿用正式报价',
+    CONFIRMED_AS_ESTIMATE: '确认改走参考报价',
+    REJECTED_QUOTED_RESULT: '正式报价已被打回',
+    HANDOFF_REQUIRED: '需要人工继续处理',
+    CLOSED_AFTER_REVIEW: '复核后关闭',
+  }
+
+  return result ? (map[result] || result) : '暂无'
+}
+
+export function getTrialReviewCalibrationSignalLabel(signal: string | null | undefined): string {
+  const map: Record<string, string> = {
+    QUOTE_TOO_HIGH: '系统正式报价连续偏高',
+    QUOTE_TOO_LOW: '系统正式报价连续偏低',
+    NO_SYSTEM_DRIFT: '暂未观察到系统性漂移',
+    NEEDS_MORE_EVIDENCE: '已有波动，但证据还不足以重开 calibration',
+  }
+
+  return signal ? (map[signal] || signal) : '暂无'
+}
+
+export function getTrialReviewDriftDirectionLabel(direction: string | null | undefined): string {
+  const map: Record<string, string> = {
+    HIGH: '同向偏高',
+    LOW: '同向偏低',
+  }
+
+  return direction ? (map[direction] || direction) : '暂无'
+}
+
+export function getTrialReviewRejectionCategoryLabel(category: string | null | undefined): string {
+  const map: Record<string, string> = {
+    price_too_high: '价格偏高',
+    price_too_low: '价格偏低',
+    should_have_been_estimated: '本应走参考报价',
+    should_have_been_handoff: '本应转人工',
+    bundle_boundary_issue: '组合边界错误',
+    business_wording_issue: '业务表达问题',
+    other: '其他',
+  }
+
+  return category ? (map[category] || category) : '未归类'
+}
+
+export function getTrialReviewTargetAreaLabel(targetArea: string | null | undefined): string {
+  const map: Record<string, string> = {
+    main_box: '主盒',
+    leaflet: '说明书',
+    box_insert: '内托',
+    seal_sticker: '封口贴',
+    carton_packaging: '外箱包装',
+    bundle_main_box_path: '组合主盒路径',
+    markup: '加价层',
+    shipping: '运费',
+    tax: '税费',
+    unknown: '暂不确定',
+  }
+
+  return targetArea ? (map[targetArea] || targetArea) : '暂不确定'
+}
+
+export function getTrialReviewActionLabel(actionType: string): string {
+  const map: Record<string, string> = {
+    QUEUED: '进入复核队列',
+    MANUAL_CONFIRMED: '人工确认',
+    RETURNED_AS_ESTIMATE: '保留参考报价',
+    HANDOFF_TO_HUMAN: '转人工处理',
+    CLOSED: '关闭复核',
+  }
+
+  return map[actionType] || actionType
+}
+
 export function getConversationScopeLabel(productType?: string): string {
   if (productType && isActiveAutoQuoteProductType(productType)) {
     return '当前活跃复杂包装'

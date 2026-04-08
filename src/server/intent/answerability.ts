@@ -85,16 +85,7 @@ export function assessAnswerability(input: AnswerabilityInput): AnswerabilityDec
   const isConsultationLayerIntent = ['MATERIAL_CONSULTATION', 'PROCESS_CONSULTATION', 'SPEC_RECOMMENDATION', 'SOLUTION_RECOMMENDATION', 'BARGAIN_REQUEST'].includes(input.intent)
   const isQuoteLayerIntent = ['QUOTE_REQUEST', 'PARAM_SUPPLEMENT', 'RECOMMENDATION_CONFIRMATION'].includes(input.intent)
 
-  if (isOutOfScopeInquiry(text) || includesAny(text, BLOCKING_COMPLEXITY_KEYWORDS)) {
-    return {
-      canAnswer: false,
-      shouldHandoff: true,
-      reason: 'out_of_scope_or_complex',
-      reply: buildStableHandoffReply('out_of_scope_or_complex'),
-    }
-  }
-
-  if (input.hasComplexPackagingRequest && includesAny(text, BLOCKING_COMPLEXITY_KEYWORDS)) {
+  if (!input.hasComplexPackagingRequest && (isOutOfScopeInquiry(text) || includesAny(text, BLOCKING_COMPLEXITY_KEYWORDS))) {
     return {
       canAnswer: false,
       shouldHandoff: true,

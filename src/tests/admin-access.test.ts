@@ -20,6 +20,7 @@ import {
   hasValidAdminAccess,
   isProtectedAdminApiPath,
   isProtectedAdminPagePath,
+  shouldUseSecureAdminCookie,
 } from '@/lib/adminAccess'
 
 interface TestResult {
@@ -36,7 +37,7 @@ const postAdminSession = (
     : (adminSessionRouteModule as { default?: { POST?: (request: NextRequest) => Promise<Response> } }).default?.POST
 )
 
-function assert(condition: boolean, message: string) {
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message)
   }
@@ -68,6 +69,21 @@ test('session token 和 header secret 都可以建立授权', async () => {
   assert(await hasValidAdminAccess({ sessionToken: token, adminSecret: secret }), '有效 session token 应通过校验')
   assert(await hasValidAdminAccess({ headerSecret: secret, adminSecret: secret }), '有效 header secret 应通过校验')
   assert(!(await hasValidAdminAccess({ sessionToken: 'wrong-token', adminSecret: secret })), '错误 token 不应通过校验')
+})
+
+test('本地 http 启动时不应给后台 cookie 加 Secure，https 或代理 https 时应保留 Secure', () => {
+  assert(
+    shouldUseSecureAdminCookie({ requestProtocol: 'http:', hostname: 'localhost' }) === false,
+    'localhost + http 下不应强制 Secure cookie',
+  )
+  assert(
+    shouldUseSecureAdminCookie({ requestProtocol: 'https:', hostname: 'localhost' }) === true,
+    'https 下应继续使用 Secure cookie',
+  )
+  assert(
+    shouldUseSecureAdminCookie({ requestProtocol: 'http:', hostname: 'example.com', forwardedProto: 'https' }) === true,
+    '反向代理传入 x-forwarded-proto=https 时应继续使用 Secure cookie',
+  )
 })
 
 test('已授权 session 不应继续显示 unauthorized 顶部提示', () => {
@@ -174,6 +190,7 @@ test('后台登录成功后应返回 303，并同时写入授权与操作者 coo
     assert(response.headers.get('location') === 'http://localhost:3000/dashboard', '登录成功后应跳转到 dashboard')
     assert(cookieHeaders.some((value) => value.includes(ADMIN_ACCESS_COOKIE_NAME)), '响应中应写入后台授权 cookie')
     assert(cookieHeaders.some((value) => value.includes(ADMIN_ACTOR_COOKIE_NAME)), '响应中应写入后台操作者 cookie')
+    assert(cookieHeaders.every((value) => !value.includes('Secure;')), 'localhost http 登录时不应写入 Secure cookie')
   } finally {
     if (previousSecret === undefined) {
       delete process.env.ADMIN_SECRET

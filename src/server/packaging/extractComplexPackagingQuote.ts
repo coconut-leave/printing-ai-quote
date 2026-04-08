@@ -2,6 +2,8 @@ import { getSampleFilesByCategory } from '@/lib/sampleFiles'
 import { getEstimatedAllowedMissingSets, getFieldLabel, isEstimatedAllowed } from '@/lib/catalog/helpers'
 import { hasStrongFileReviewSignal } from '@/server/intent/detectIntent'
 import { assessComplexPackagingPricingReview } from '@/server/pricing/complexPackagingQuote'
+import { assessWorkbookLineItemDecision } from '@/server/pricing/complexPackagingLineItemEngine'
+import { assessPricingTrialScope } from '@/server/pricing/pricingTrialScopeDraft'
 import type {
   ComplexPackagingConversationSnapshot,
   ComplexPackagingConversationAction,
@@ -21,15 +23,19 @@ const ITEM_TYPE_TITLES: Record<ComplexPackagingProductType, string> = {
   leaflet_insert: '说明书',
   box_insert: '内托',
   seal_sticker: '封口贴',
+  foil_bag: '铝箔袋',
+  carton_packaging: '纸箱包装',
 }
 
 const ITEM_ALIASES: Array<{ aliases: string[]; productType: ComplexPackagingProductType; title: string }> = [
   { aliases: ['飞机盒'], productType: 'mailer_box', title: '飞机盒' },
   { aliases: ['双插盒'], productType: 'tuck_end_box', title: '双插盒' },
   { aliases: ['双插开窗彩盒', '双插开窗盒', '开窗双插盒', '开窗彩盒', '开窗盒', '彩盒'], productType: 'window_box', title: '开窗彩盒' },
-  { aliases: ['说明书', '折页'], productType: 'leaflet_insert', title: '说明书' },
-  { aliases: ['内托'], productType: 'box_insert', title: '内托' },
-  { aliases: ['透明贴纸', '封口贴', '贴纸'], productType: 'seal_sticker', title: '封口贴' },
+  { aliases: ['说明书', '折页', '插页'], productType: 'leaflet_insert', title: '说明书' },
+  { aliases: ['纸内托', '内卡', '内托', '纸托'], productType: 'box_insert', title: '内托' },
+  { aliases: ['透明贴纸', '透明贴', '封口贴', '贴纸', '纸贴', '镭射膜贴纸', '镭射膜贴', '镭射贴纸', '镭射贴'], productType: 'seal_sticker', title: '封口贴' },
+  { aliases: ['铝箔袋', '铝铂袋', 'foil bag'], productType: 'foil_bag', title: '铝箔袋' },
+  { aliases: ['纸箱+包装费', '大外箱', '外箱', '空白箱', 'carton packaging'], productType: 'carton_packaging', title: '纸箱包装' },
 ]
 
 const MATERIAL_ALIASES: Array<{ alias: string; normalized: string }> = [
@@ -37,14 +43,25 @@ const MATERIAL_ALIASES: Array<{ alias: string; normalized: string }> = [
   { alias: '牛皮纸', normalized: 'kraft' },
   { alias: '白卡', normalized: 'white_card' },
   { alias: '白卡纸', normalized: 'white_card' },
+  { alias: '白板', normalized: 'white_card' },
+  { alias: '白板纸', normalized: 'white_card' },
+  { alias: '双胶纸', normalized: 'offset_paper' },
   { alias: '单铜', normalized: 'single_coated' },
   { alias: '双铜', normalized: 'double_coated' },
   { alias: '特种纸板', normalized: 'specialty_board' },
   { alias: 'web特种纸板', normalized: 'specialty_board' },
   { alias: '透明贴纸', normalized: 'clear_sticker' },
+  { alias: '纸贴', normalized: 'paper_sticker' },
+  { alias: '镭射膜贴纸', normalized: 'laser_sticker' },
+  { alias: '镭射膜贴', normalized: 'laser_sticker' },
+  { alias: '镭射贴纸', normalized: 'laser_sticker' },
+  { alias: '镭射贴', normalized: 'laser_sticker' },
+  { alias: '铝箔袋', normalized: 'foil_bag' },
+  { alias: '铝铂袋', normalized: 'foil_bag' },
+  { alias: '空白箱', normalized: 'corrugated_carton' },
 ]
 
-const PROCESS_KEYWORDS = ['裱', '啤', '粘', '粘合', '过哑胶', '过光胶', '开窗', '贴胶片', 'uv']
+const PROCESS_KEYWORDS = ['裱', '啤', '模切', '半穿', '裁切', '粘', '粘合', '贴合', '成型', '过哑胶', '过光胶', '过光油', '表面过光', '开窗', '贴胶片', '折', 'uv']
 const HUMAN_REVIEW_KEYWORDS = ['异形', '磁吸', '天地盖', '吸塑', 'eva', '木盒', '金属']
 const REFERENCE_CONTINUATION_PATTERNS = ['按这个方案报价', '按这个方案', '按你刚才推荐的来', '按你刚才的来', '就按这个做', '就按这个']
 const ADD_ITEM_PATTERNS = ['再加', '加一个', '加上', '增加', '补一个']
@@ -74,6 +91,10 @@ function normalizeTitle(rawTitle?: string, fallbackType?: ComplexPackagingProduc
       return '内托'
     case 'seal_sticker':
       return '封口贴'
+    case 'foil_bag':
+      return '铝箔袋'
+    case 'carton_packaging':
+      return '纸箱包装'
     default:
       return '复杂包装项'
   }
@@ -190,8 +211,28 @@ function extractTwoDimensions(text: string): { length: number; width: number; un
   }
 }
 
+function extractFlatDimensions(text: string): { length: number; width: number; unit: SizeUnit } | null {
+  const patterns = [
+    /(?:展开|开料|开纸|展开尺寸)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*[*xX×]\s*(\d+(?:\.\d+)?)\s*(mm|cm)?/i,
+    /(\d+(?:\.\d+)?)\s*[*xX×]\s*(\d+(?:\.\d+)?)\s*(mm|cm)?\s*(?:展开|开料|开纸)/i,
+  ]
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern)
+    if (match) {
+      return {
+        length: Number(match[1]),
+        width: Number(match[2]),
+        unit: (match[3]?.toLowerCase() as SizeUnit) || 'mm',
+      }
+    }
+  }
+
+  return null
+}
+
 function extractWeight(text: string): number | undefined {
-  const match = text.match(/(\d+(?:\.\d+)?)\s*克/i)
+  const match = text.match(/(\d+(?:\.\d+)?)\s*(?:克|g)/i)
   if (!match) return undefined
   return Number(match[1])
 }
@@ -201,19 +242,56 @@ function extractMaterial(text: string): string | undefined {
   return MATERIAL_ALIASES.find((item) => lowered.includes(item.alias.toLowerCase()))?.normalized
 }
 
+function extractPaperLayers(text: string): Array<{ material: string; weight?: number }> {
+  const pattern = /(\d+(?:\.\d+)?)\s*(?:克|g)?\s*(牛纸|牛皮纸|白卡纸|白卡|白板纸|白板|单铜|双铜|双胶纸|特种纸板|web特种纸板)/gi
+  const layers: Array<{ material: string; weight?: number }> = []
+
+  for (const match of text.matchAll(pattern)) {
+    const alias = match[2]
+    const normalized = extractMaterial(alias)
+    if (!normalized) continue
+
+    layers.push({
+      material: normalized,
+      weight: Number(match[1]),
+    })
+  }
+
+  return layers
+}
+
+function extractCoreMaterialCode(text: string): string | undefined {
+  const match = text.match(/(A\/?E|WE|W9\+?|A9\+?|AE|AF|E|D9\+?|K9\+?)/i)
+  if (!match) return undefined
+  return match[1].replace(/\+/g, '').replace('/', '').toUpperCase()
+}
+
+function extractCoreMaterialWeight(text: string): number | undefined {
+  const inlineCodeWeight = text.match(/K9\+?\s*(\d+(?:\.\d+)?)\s*(?:克|g)/i)
+  if (inlineCodeWeight) {
+    return Number(inlineCodeWeight[1])
+  }
+
+  const explicitCoreWeight = text.match(/(\d+(?:\.\d+)?)\s*(?:克|g)\s*(?:芯|加强芯)/i)
+  if (!explicitCoreWeight) return undefined
+  return Number(explicitCoreWeight[1])
+}
+
 function extractPrintColor(text: string): string | undefined {
+  if (text.includes('无印刷') || text.includes('不印刷') || text.includes('无印')) return 'none'
   if (text.includes('双面黑白') || text.includes('正反黑白') || text.includes('黑白')) return 'black'
   if (text.includes('正反四色') || text.includes('双面四色')) return 'double_four_color'
   if (text.includes('四色') && text.includes('专色')) return 'four_color_spot'
   if (text.includes('四色')) return 'four_color'
   if (text.includes('印黑色') || text.includes('黑色')) return 'black'
   if (text.includes('专色')) return 'spot'
+  if (text.includes('单面印') || text.includes('双面印')) return 'generic_print'
   return undefined
 }
 
 function extractSurfaceFinish(text: string): string | undefined {
   if (text.includes('过哑胶') || text.includes('哑胶') || text.includes('哑膜')) return 'matte_lamination'
-  if (text.includes('过光胶') || text.includes('光胶') || text.includes('光膜')) return 'glossy_lamination'
+  if (text.includes('过光胶') || text.includes('光胶') || text.includes('光膜') || text.includes('过光油') || text.includes('表面过光')) return 'glossy_lamination'
   if (toLowerText(text).includes('uv')) return 'uv'
   return undefined
 }
@@ -227,7 +305,37 @@ function extractSpotColorCount(text: string): number {
   if (explicit) {
     return Number(explicit[1])
   }
+  if (text.includes('专印')) {
+    return 1
+  }
   return text.includes('专色') ? 1 : 0
+}
+
+function propagateSharedBundleQuantity(items: ComplexPackagingItem[]): ComplexPackagingItem[] {
+  if (items.length <= 1) {
+    return items
+  }
+
+  const sharedQuantities = Array.from(new Set(items
+    .map((item) => item.quantity)
+    .filter((quantity): quantity is number => typeof quantity === 'number' && Number.isFinite(quantity) && quantity > 0)))
+
+  if (sharedQuantities.length !== 1) {
+    return items
+  }
+
+  const sharedQuantity = sharedQuantities[0]
+  return items.map((item) => {
+    if (item.quantity) {
+      return item
+    }
+
+    return {
+      ...item,
+      quantity: sharedQuantity,
+      actualQuantity: sharedQuantity,
+    }
+  })
 }
 
 function extractWindowFilmThickness(text: string): number | undefined {
@@ -309,7 +417,7 @@ function hasMeaningfulItemFields(item: ComplexPackagingItem | null | undefined):
     return false
   }
 
-  const nonSignalKeys = new Set(['productType', 'title', 'boxStyle', 'hasWindow', 'insertType', 'stickerType'])
+  const nonSignalKeys = new Set(['productType', 'title', 'sourceText', 'boxStyle', 'hasWindow', 'insertType', 'stickerType'])
 
   const keys = Object.entries(item)
     .filter(([key, value]) => !nonSignalKeys.has(key) && value !== undefined && value !== null)
@@ -379,9 +487,9 @@ function buildRequestFromItems(
       : []
   const referenceFileCategory = references.referenceFileCategory || previous?.referenceFileCategory
   const hasReferenceFile = referenceFiles.length > 0
-  const requiresHumanReview = hasReferenceFile
+  const requiresHumanReview = Boolean(previous?.requiresHumanReview)
+    || hasReferenceFile
     || HUMAN_REVIEW_KEYWORDS.some((keyword) => lowered.includes(keyword))
-    || items.length > 1
 
   return {
     isBundle: items.length > 1,
@@ -516,7 +624,7 @@ function coerceRequest(raw: any): ComplexPackagingRequest | null {
     hasReferenceFile: Boolean(raw.hasReferenceFile),
     referenceFileCategory: raw.referenceFileCategory,
     referenceFiles: Array.isArray(raw.referenceFiles) ? raw.referenceFiles : [],
-    requiresHumanReview: Boolean(raw.requiresHumanReview) || allItems.length > 1,
+    requiresHumanReview: Boolean(raw.requiresHumanReview),
     notes: Array.isArray(raw.notes) ? raw.notes.filter((note: unknown): note is string => typeof note === 'string') : [],
   }
 }
@@ -530,6 +638,7 @@ function normalizeItem(segment: string, fallbackType?: ComplexPackagingProductTy
   const item: ComplexPackagingItem = {
     productType: typeInfo.productType,
     title: normalizeTitle(title || typeInfo.title, typeInfo.productType),
+    sourceText: segment,
     quantity: extractQuantity(segment),
     material: extractMaterial(segment),
     weight: extractWeight(segment),
@@ -537,6 +646,40 @@ function normalizeItem(segment: string, fallbackType?: ComplexPackagingProductTy
     surfaceFinish: extractSurfaceFinish(segment),
     processes: undefined,
     notes: undefined,
+  }
+
+  const flatDimensions = extractFlatDimensions(segment)
+  if (flatDimensions) {
+    item.flatLength = flatDimensions.length
+    item.flatWidth = flatDimensions.width
+    item.sizeUnit = flatDimensions.unit
+  }
+
+  if (item.quantity) {
+    item.actualQuantity = item.quantity
+  }
+
+  const paperLayers = extractPaperLayers(segment)
+  if (paperLayers.length > 0) {
+    item.outerMaterial = paperLayers[0]?.material
+    item.outerWeight = paperLayers[0]?.weight
+    item.material = item.material || paperLayers[0]?.material
+    item.weight = item.weight || paperLayers[0]?.weight
+  }
+
+  if (paperLayers.length > 1) {
+    item.innerMaterial = paperLayers[1]?.material
+    item.innerWeight = paperLayers[1]?.weight
+  }
+
+  const coreMaterialCode = extractCoreMaterialCode(segment)
+  if (coreMaterialCode) {
+    item.coreMaterialCode = coreMaterialCode
+  }
+
+  const coreMaterialWeight = extractCoreMaterialWeight(segment)
+  if (coreMaterialWeight) {
+    item.coreMaterialWeight = coreMaterialWeight
   }
 
   const processes = extractProcesses(segment)
@@ -572,7 +715,7 @@ function normalizeItem(segment: string, fallbackType?: ComplexPackagingProductTy
     if (segment.includes('啤')) item.dieCut = true
     if (segment.includes('粘')) item.gluing = true
     if (segment.includes('哑胶') || segment.includes('哑膜')) item.laminationType = 'matte'
-    if (segment.includes('光胶') || segment.includes('光膜')) item.laminationType = 'glossy'
+    if (segment.includes('光胶') || segment.includes('光膜') || segment.includes('过光油') || segment.includes('表面过光')) item.laminationType = 'glossy'
   }
 
   if (item.productType === 'window_box') {
@@ -598,6 +741,7 @@ function normalizeItem(segment: string, fallbackType?: ComplexPackagingProductTy
     item.printSides = segment.includes('双面') ? 'double' : segment.includes('单面') ? 'single' : undefined
     item.foldCount = extractFoldCount(segment)
     item.foldType = item.foldCount && item.foldCount >= 3 ? 'tri_fold' : item.foldCount === 2 ? 'bi_fold' : undefined
+    if (segment.includes('模切') || segment.includes('刀模') || segment.includes('裁切')) item.dieCut = true
   }
 
   if (item.productType === 'box_insert') {
@@ -609,6 +753,11 @@ function normalizeItem(segment: string, fallbackType?: ComplexPackagingProductTy
     }
     item.insertType = 'paper_board'
     item.insertMaterial = item.material
+    if (segment.includes('裱') || segment.includes('对裱') || segment.includes('贴合')) item.mounting = true
+    if (segment.includes('啤') || segment.includes('模切') || segment.includes('刀模') || segment.includes('成型')) item.dieCut = true
+    if (segment.includes('粘') || segment.includes('贴合')) item.gluing = true
+    if (segment.includes('哑胶') || segment.includes('哑膜')) item.laminationType = 'matte'
+    if (segment.includes('光胶') || segment.includes('光膜')) item.laminationType = 'glossy'
   }
 
   if (item.productType === 'seal_sticker') {
@@ -620,6 +769,42 @@ function normalizeItem(segment: string, fallbackType?: ComplexPackagingProductTy
     }
     item.stickerType = 'seal_sticker'
     item.stickerMaterial = item.material
+    if (segment.includes('模切') || segment.includes('半穿')) item.dieCut = true
+  }
+
+  if (item.productType === 'foil_bag') {
+    const dimensions = extractTwoDimensions(segment)
+    if (dimensions) {
+      item.length = dimensions.length
+      item.width = dimensions.width
+      item.sizeUnit = dimensions.unit
+    }
+
+    item.material = item.material || 'foil_bag'
+    if ((segment.includes('空白') || segment.includes('无印')) && !item.printColor) {
+      item.printColor = 'none'
+    }
+  }
+
+  if (item.productType === 'carton_packaging') {
+    const dimensions = extractThreeDimensions(segment)
+    if (dimensions) {
+      item.length = dimensions.length
+      item.width = dimensions.width
+      item.height = dimensions.height
+      item.sizeUnit = dimensions.unit
+    }
+
+    if (/k\d+[a-z]?\d*k/i.test(segment) || segment.includes('空白箱')) {
+      item.material = 'corrugated_carton'
+    }
+
+    if ((segment.includes('空白') || segment.includes('无印')) && !item.printColor) {
+      item.printColor = 'none'
+    }
+
+    if (segment.includes('啤')) item.dieCut = true
+    if (segment.includes('粘') || segment.includes('打包') || segment.includes('装箱')) item.gluing = true
   }
 
   return item
@@ -656,9 +841,9 @@ export function extractComplexPackagingQuoteRequest(message: string): ComplexPac
     }
   }
 
-  const items = segments
+  const items = propagateSharedBundleQuantity(segments
     .map(({ segment, productType, rawTitle }) => normalizeItem(segment, productType, rawTitle))
-    .filter((item): item is ComplexPackagingItem => Boolean(item))
+    .filter((item): item is ComplexPackagingItem => Boolean(item)))
 
   if (items.length === 0) {
     return null
@@ -667,7 +852,6 @@ export function extractComplexPackagingQuoteRequest(message: string): ComplexPac
   const references = buildReferenceFiles(lowered)
   const requiresHumanReview = references.hasReferenceFile
     || HUMAN_REVIEW_KEYWORDS.some((keyword) => lowered.includes(keyword))
-    || items.length > 1
 
   return {
     isBundle: items.length > 1,
@@ -678,7 +862,7 @@ export function extractComplexPackagingQuoteRequest(message: string): ComplexPac
     referenceFileCategory: references.referenceFileCategory,
     referenceFiles: references.referenceFiles,
     requiresHumanReview,
-    notes: requiresHumanReview ? ['组合件或文件参考存在，结果默认为预报价并建议人工复核。'] : [],
+    notes: requiresHumanReview ? ['当前请求命中人工复核信号，结果将保守处理。'] : [],
   }
 }
 
@@ -854,9 +1038,17 @@ function collectMissingFields(item: ComplexPackagingItem): string[] {
   })
 }
 
+function isExplicitNoFilmWindow(item: ComplexPackagingItem): boolean {
+  return item.productType === 'window_box' && /不贴胶片|无胶片/i.test(item.sourceText || '')
+}
+
 function getRequiredFieldsForPackagingItem(item: ComplexPackagingItem): string[] {
   switch (item.productType) {
     case 'window_box':
+      if (isExplicitNoFilmWindow(item)) {
+        return ['quantity', 'material', 'weight', 'printColor', 'length', 'width', 'height']
+      }
+
       return ['quantity', 'material', 'weight', 'printColor', 'length', 'width', 'height', 'windowFilmThickness', 'windowSizeLength', 'windowSizeWidth']
     case 'mailer_box':
     case 'tuck_end_box':
@@ -867,6 +1059,10 @@ function getRequiredFieldsForPackagingItem(item: ComplexPackagingItem): string[]
       return ['quantity', 'insertMaterial', 'insertLength', 'insertWidth']
     case 'seal_sticker':
       return ['quantity', 'stickerMaterial', 'stickerLength', 'stickerWidth']
+    case 'foil_bag':
+      return ['quantity', 'length', 'width']
+    case 'carton_packaging':
+      return ['quantity', 'length', 'width', 'height']
     default:
       return []
   }
@@ -891,6 +1087,8 @@ function isAllowedEstimatedSet(item: ComplexPackagingItem, missingFields: string
 
 export function decideComplexPackagingQuotePath(request: ComplexPackagingRequest): ComplexPackagingDecision {
   const pricingReview = assessComplexPackagingPricingReview(request)
+  const workbookAssessment = assessWorkbookLineItemDecision(request)
+  const trialScope = assessPricingTrialScope(request)
   const missingDetails: ComplexPackagingMissingDetail[] = request.allItems
     .map((item, itemIndex) => ({
       itemIndex,
@@ -906,20 +1104,74 @@ export function decideComplexPackagingQuotePath(request: ComplexPackagingRequest
     return {
       status: 'handoff_required',
       reason: 'reference_file_with_missing_fields',
+      reasonText: trialScope.requestGateReasonText,
+      trialGateStatus: trialScope.requestGateStatus,
+      trialBundleGateStatus: trialScope.bundleGateStatus,
+      missingDetails,
+      missingFields,
+    }
+  }
+
+  if (workbookAssessment?.status === 'handoff_required') {
+    return {
+      status: 'handoff_required',
+      reason: 'blocking_workbook_line_item',
+      reasonText: trialScope.requestGateReasonText,
+      trialGateStatus: trialScope.requestGateStatus,
+      trialBundleGateStatus: trialScope.bundleGateStatus,
       missingDetails,
       missingFields,
     }
   }
 
   if (missingDetails.length === 0) {
-    if (request.isBundle || request.requiresHumanReview || pricingReview.requiresHumanReview) {
+    if (workbookAssessment?.status === 'estimated') {
       return {
         status: 'estimated',
-        reason: request.isBundle
-          ? 'bundle_prequote'
+        reason: 'line_item_template_incomplete',
+        reasonText: trialScope.requestGateReasonText,
+        trialGateStatus: trialScope.requestGateStatus,
+        trialBundleGateStatus: trialScope.bundleGateStatus,
+        missingDetails,
+        missingFields,
+      }
+    }
+
+    if (request.requiresHumanReview || pricingReview.requiresHumanReview) {
+      return {
+        status: trialScope.requestGateStatus === 'handoff_only_in_trial' ? 'handoff_required' : 'estimated',
+        reason: trialScope.requestGateStatus === 'handoff_only_in_trial'
+          ? trialScope.requestGateReasonCode
           : request.requiresHumanReview
             ? 'requires_human_review'
             : 'pricing_uncertainty_requires_review',
+        reasonText: trialScope.requestGateReasonText,
+        trialGateStatus: trialScope.requestGateStatus,
+        trialBundleGateStatus: trialScope.bundleGateStatus,
+        missingDetails,
+        missingFields,
+      }
+    }
+
+    if (trialScope.requestGateStatus === 'handoff_only_in_trial') {
+      return {
+        status: 'handoff_required',
+        reason: trialScope.requestGateReasonCode,
+        reasonText: trialScope.requestGateReasonText,
+        trialGateStatus: trialScope.requestGateStatus,
+        trialBundleGateStatus: trialScope.bundleGateStatus,
+        missingDetails,
+        missingFields,
+      }
+    }
+
+    if (trialScope.requestGateStatus === 'estimated_only_in_trial') {
+      return {
+        status: 'estimated',
+        reason: trialScope.requestGateReasonCode,
+        reasonText: trialScope.requestGateReasonText,
+        trialGateStatus: trialScope.requestGateStatus,
+        trialBundleGateStatus: trialScope.bundleGateStatus,
         missingDetails,
         missingFields,
       }
@@ -927,7 +1179,12 @@ export function decideComplexPackagingQuotePath(request: ComplexPackagingRequest
 
     return {
       status: 'quoted',
-      reason: 'all_packaging_fields_present',
+      reason: trialScope.requestGateReasonCode === 'trial_standard_bundle_quoted'
+        ? trialScope.requestGateReasonCode
+        : 'all_packaging_fields_present',
+      reasonText: trialScope.requestGateReasonText,
+      trialGateStatus: trialScope.requestGateStatus,
+      trialBundleGateStatus: trialScope.bundleGateStatus,
       missingDetails,
       missingFields,
     }
@@ -941,6 +1198,9 @@ export function decideComplexPackagingQuotePath(request: ComplexPackagingRequest
       return {
         status: 'estimated',
         reason: 'allowed_packaging_estimated_missing_set',
+        reasonText: trialScope.requestGateReasonText,
+        trialGateStatus: trialScope.requestGateStatus,
+        trialBundleGateStatus: trialScope.bundleGateStatus,
         missingDetails,
         missingFields,
       }
@@ -951,6 +1211,9 @@ export function decideComplexPackagingQuotePath(request: ComplexPackagingRequest
     return {
       status: 'missing_fields',
       reason: 'bundle_item_fields_missing',
+      reasonText: trialScope.requestGateReasonText,
+      trialGateStatus: trialScope.requestGateStatus,
+      trialBundleGateStatus: trialScope.bundleGateStatus,
       missingDetails,
       missingFields,
     }
@@ -959,6 +1222,9 @@ export function decideComplexPackagingQuotePath(request: ComplexPackagingRequest
   return {
     status: 'missing_fields',
     reason: 'packaging_required_fields_missing',
+    reasonText: trialScope.requestGateReasonText,
+    trialGateStatus: trialScope.requestGateStatus,
+    trialBundleGateStatus: trialScope.bundleGateStatus,
     missingDetails,
     missingFields,
   }

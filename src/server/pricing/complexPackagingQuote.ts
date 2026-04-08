@@ -7,10 +7,12 @@ import type {
   ComplexPackagingReviewReason,
   ComplexPackagingReviewReasonCode,
 } from '@/server/packaging/types'
+import { aggregateBundlePricing } from './bundleAggregation'
+import { buildWorkbookLineItemQuote } from './complexPackagingLineItemEngine'
 
 const round2 = (value: number) => Math.round(value * 100) / 100
 const BASE_SHIPPING_FEE = 80
-const LARGE_WINDOW_RATIO_THRESHOLD = 0.4
+const LARGE_WINDOW_RATIO_THRESHOLD = 0.65
 
 type QuantityLadderEntry = {
   minQty: number
@@ -39,7 +41,7 @@ type PackagingPricingReview = {
   reviewReasons: ComplexPackagingReviewReason[]
 }
 
-const BOX_ITEM_TYPES: ComplexPackagingProductType[] = ['mailer_box', 'tuck_end_box', 'window_box']
+const BOX_ITEM_TYPES: ComplexPackagingProductType[] = ['mailer_box', 'tuck_end_box', 'window_box', 'carton_packaging']
 
 const BOX_QUANTITY_LADDER: QuantityLadderEntry[] = [
   { minQty: 10000, runMultiplier: 0.82, setupMultiplier: 1.0, label: '10000+ 个大货阶梯' },
@@ -76,6 +78,8 @@ const MINIMUM_LINE_TOTAL: Record<ComplexPackagingProductType, number> = {
   leaflet_insert: 220,
   box_insert: 300,
   seal_sticker: 180,
+  foil_bag: 320,
+  carton_packaging: 260,
 }
 
 const BASE_SETUP_COST: Record<ComplexPackagingProductType, number> = {
@@ -85,6 +89,8 @@ const BASE_SETUP_COST: Record<ComplexPackagingProductType, number> = {
   leaflet_insert: 60,
   box_insert: 80,
   seal_sticker: 50,
+  foil_bag: 70,
+  carton_packaging: 65,
 }
 
 const BOX_MATERIAL_RATE: Record<string, number> = {
@@ -130,6 +136,8 @@ const MATERIAL_LABELS: Record<string, string> = {
   double_coated: '双铜',
   specialty_board: '特种纸板',
   clear_sticker: '透明贴纸',
+  foil_bag: '铝箔袋材',
+  corrugated_carton: '瓦楞纸箱',
 }
 
 const PRINT_LABELS: Record<string, string> = {
@@ -199,6 +207,10 @@ function getMaterialRate(item: ComplexPackagingItem): number {
       return INSERT_MATERIAL_RATE[material] || INSERT_MATERIAL_RATE.white_card
     case 'seal_sticker':
       return STICKER_MATERIAL_RATE[material] || STICKER_MATERIAL_RATE.clear_sticker
+    case 'foil_bag':
+      return 0.11
+    case 'carton_packaging':
+      return 0.068
     default:
       return BOX_MATERIAL_RATE.white_card
   }
@@ -223,6 +235,10 @@ function getWeightMultiplier(item: ComplexPackagingItem): number {
     if (weight <= 100) return 1.06
     if (weight <= 128) return 1.12
     return 1.22
+  }
+
+  if (item.productType === 'foil_bag') {
+    return 1.0
   }
 
   if (weight <= 250) return 0.94
@@ -264,6 +280,10 @@ function getPrintSetupPerPass(productType: ComplexPackagingProductType): number 
       return 12
     case 'seal_sticker':
       return 10
+    case 'foil_bag':
+      return 12
+    case 'carton_packaging':
+      return 16
     default:
       return 12
   }
@@ -281,6 +301,10 @@ function getPrintRunRatePerPass(productType: ComplexPackagingProductType): numbe
       return 0.006
     case 'seal_sticker':
       return 0.007
+    case 'foil_bag':
+      return 0.01
+    case 'carton_packaging':
+      return 0.009
     default:
       return 0.008
   }
@@ -292,6 +316,10 @@ function getLaminationRunRate(productType: ComplexPackagingProductType): number 
       return 0.009
     case 'seal_sticker':
       return 0.007
+    case 'foil_bag':
+      return 0.005
+    case 'carton_packaging':
+      return 0.012
     default:
       return 0.018
   }
@@ -351,6 +379,10 @@ function getPricingAreaCm2(item: ComplexPackagingItem): number {
       return getPlanarAreaCm2(item.insertLength, item.insertWidth, item.sizeUnit, 120)
     case 'seal_sticker':
       return getPlanarAreaCm2(item.stickerLength, item.stickerWidth, item.sizeUnit, 8)
+    case 'foil_bag':
+      return getPlanarAreaCm2(item.length, item.width, item.sizeUnit, 30)
+    case 'carton_packaging':
+      return getBoxBlankAreaCm2(item)
     default:
       return 0
   }
@@ -369,7 +401,7 @@ function getWindowReferenceAreaCm2(item: ComplexPackagingItem): number {
     return 0
   }
 
-  return Math.max(length, width) * height
+  return Math.min(length, width) * height
 }
 
 function getWindowAreaRatio(item: ComplexPackagingItem): number {
@@ -501,6 +533,63 @@ function createReviewReason(
   }
 }
 
+function isStandardWorkbookTemplateProcessCombo(item: ComplexPackagingItem, processCount: number): boolean {
+  if (item.productType === 'tuck_end_box') {
+    const standardTuckEndTerms = new Set([
+      '啤',
+      '模切',
+      '粘',
+      '粘合',
+      '过哑胶',
+      '过光胶',
+      '过光油',
+      '表面过光',
+      'matte',
+      'glossy',
+      'matte_lamination',
+      'gloss_lamination',
+    ])
+    const hasOnlyStandardTerms = (item.processes || []).every((term) => standardTuckEndTerms.has(term))
+    return hasOnlyStandardTerms && processCount <= 6
+  }
+
+  if (item.productType === 'mailer_box') {
+    return processCount <= 5
+  }
+
+  if (item.productType === 'window_box') {
+    const standardWindowTerms = new Set(['裱', '啤', '粘', '粘合', '过哑胶', '过光胶', '过光油', '表面过光', '开窗', '贴胶片'])
+    const hasOnlyStandardTerms = (item.processes || []).every((term) => standardWindowTerms.has(term))
+    return hasOnlyStandardTerms && (item.windowFilmThickness || 0) <= 0.2
+  }
+
+  if (item.productType === 'leaflet_insert') {
+    return processCount <= 4
+  }
+
+  if (item.productType === 'box_insert') {
+    const standardInsertTerms = new Set(['裱', '啤', '模切', '成型', '贴合', '过哑胶', '过光胶'])
+    return (item.processes || []).every((term) => standardInsertTerms.has(term))
+  }
+
+  if (item.productType === 'seal_sticker') {
+    const standardStickerTerms = new Set(['模切', '半穿', '裁切'])
+    return (item.processes || []).every((term) => standardStickerTerms.has(term)) || processCount <= 3
+  }
+
+  if (item.productType === 'foil_bag') {
+    const standardBagTerms = new Set(['制袋', '打样'])
+    return (item.processes || []).every((term) => standardBagTerms.has(term)) || processCount <= 3
+  }
+
+  if (item.productType === 'carton_packaging') {
+    const standardCartonTerms = new Set(['成箱', '粘箱', '打包', '包装费'])
+    return (item.processes || []).every((term) => standardCartonTerms.has(term)) || processCount <= 4
+  }
+
+  return false
+}
+
 function assessItemPricingReviewReasons(item: ComplexPackagingItem): ComplexPackagingReviewReason[] {
   const reasons: ComplexPackagingReviewReason[] = []
   const quantity = item.quantity || 0
@@ -521,7 +610,7 @@ function assessItemPricingReviewReasons(item: ComplexPackagingItem): ComplexPack
     reasons.push(createReviewReason(item, 'low_quantity_box', '低数量盒型', `${summarizeLine(item)}数量低于 500，开机费和损耗分摊敏感。`))
   }
 
-  if (spotCount >= 3) {
+  if (isBoxItem(item.productType) && spotCount >= 3) {
     reasons.push(createReviewReason(item, 'high_spot_color_count', '专色数量高', `${summarizeLine(item)}专色较多，建议人工确认专色版费与油墨损耗。`))
   }
 
@@ -531,7 +620,7 @@ function assessItemPricingReviewReasons(item: ComplexPackagingItem): ComplexPack
     if (thickness >= 0.3) {
       reasons.push(createReviewReason(item, 'thick_window_film', '胶片较厚', `${summarizeLine(item)}胶片厚度达到 ${round2(thickness)}mm，建议人工确认胶片成本。`))
     }
-    if (ratio >= LARGE_WINDOW_RATIO_THRESHOLD) {
+    if (ratio >= LARGE_WINDOW_RATIO_THRESHOLD || (ratio >= 0.5 && thickness >= 0.3)) {
       reasons.push(createReviewReason(item, 'large_window_ratio', '开窗比例大', `${summarizeLine(item)}开窗面积占比偏大，建议人工确认结构强度与损耗。`))
     }
   }
@@ -540,7 +629,7 @@ function assessItemPricingReviewReasons(item: ComplexPackagingItem): ComplexPack
     reasons.push(createReviewReason(item, 'high_weight_specialty_board', '高克重特种纸板', `${summarizeLine(item)}使用高克重特种纸板，建议人工确认纸板单价。`))
   }
 
-  if (processCount >= 4) {
+  if (processCount >= 4 && !isStandardWorkbookTemplateProcessCombo(item, processCount)) {
     reasons.push(createReviewReason(item, 'nonstandard_process_combo', '工艺组合复杂', `${summarizeLine(item)}涉及较多叠加工艺，建议人工确认实际损耗和后道排产。`))
   }
 
@@ -601,15 +690,24 @@ function buildLineQuote(item: ComplexPackagingItem, breakdown: LineCostBreakdown
   return {
     itemType: item.productType,
     title: summarizeLine(item),
+    pricingModel: 'legacy_multiplier',
+    templateId: 'legacy_fallback',
     normalizedParams: item,
     quantity: breakdown.quantity,
+    actualQuantity: breakdown.quantity,
+    chargeQuantity: breakdown.quantity,
     unitPrice: breakdown.unitPrice,
     totalPrice: breakdown.totalPrice,
+    costSubtotal: breakdown.totalPrice,
+    quotedAmount: breakdown.totalPrice,
+    quoteMarkup: 1,
+    taxMultiplier: 1,
     setupCost: breakdown.setupCost,
     runCost: breakdown.runCost,
     materialUnitCost: breakdown.materialUnitCost,
     printUnitCost: breakdown.printUnitCost,
     processUnitCost: breakdown.processUnitCost,
+    lineItems: [],
     reviewFlags: breakdown.reviewFlags,
     reviewReasons: breakdown.reviewReasons,
     notes: breakdown.notes,
@@ -652,7 +750,24 @@ export function calculateSealStickerQuote(item: ComplexPackagingItem): ComplexPa
   return buildLineQuote(item, breakdown)
 }
 
+export function calculateFoilBagQuote(item: ComplexPackagingItem): ComplexPackagingLineQuote {
+  const breakdown = calculateLineCost(item)
+  breakdown.notes.unshift('铝箔袋按袋型面积、制袋工和必要开机费计价。')
+  return buildLineQuote(item, breakdown)
+}
+
+export function calculateCartonPackagingQuote(item: ComplexPackagingItem): ComplexPackagingLineQuote {
+  const breakdown = calculateLineCost(item)
+  breakdown.notes.unshift('纸箱包装按外箱体积、数量阶梯与包装工计价。')
+  return buildLineQuote(item, breakdown)
+}
+
 function calculateLineQuote(item: ComplexPackagingItem): ComplexPackagingLineQuote {
+  const workbookLineItemQuote = buildWorkbookLineItemQuote(item)
+  if (workbookLineItemQuote) {
+    return workbookLineItemQuote.lineQuote
+  }
+
   switch (item.productType) {
     case 'mailer_box':
       return calculateMailerBoxQuote(item)
@@ -666,6 +781,10 @@ function calculateLineQuote(item: ComplexPackagingItem): ComplexPackagingLineQuo
       return calculateBoxInsertQuote(item)
     case 'seal_sticker':
       return calculateSealStickerQuote(item)
+    case 'foil_bag':
+      return calculateFoilBagQuote(item)
+    case 'carton_packaging':
+      return calculateCartonPackagingQuote(item)
     default:
       return buildLineQuote(item, {
         quantity: item.quantity || 0,
@@ -683,33 +802,12 @@ function calculateLineQuote(item: ComplexPackagingItem): ComplexPackagingLineQuo
   }
 }
 
-function calculateShippingFee(request: ComplexPackagingRequest): number {
-  const maxQuantity = Math.max(...request.allItems.map((item) => item.quantity || 0), 0)
-  let shippingFee = request.isBundle ? 80 + request.subItems.length * 12 : 60
-
-  if (maxQuantity >= 10000) {
-    shippingFee += 35
-  } else if (maxQuantity >= 5000) {
-    shippingFee += 20
-  }
-
-  if (request.allItems.some((item) => item.productType === 'window_box')) {
-    shippingFee += 15
-  }
-
-  return round2(shippingFee)
-}
-
 export function calculateBundleQuote(request: ComplexPackagingRequest): ComplexPackagingQuoteResult {
   const items = request.allItems.map((item) => calculateLineQuote(item))
   const mainItem = items[0]
   const subItems = items.slice(1)
   const pricingReview = assessComplexPackagingPricingReview(request)
-  const totalUnitPrice = round2(items.reduce((sum, item) => sum + item.unitPrice, 0))
-  const totalPrice = round2(items.reduce((sum, item) => sum + item.totalPrice, 0))
-  const shippingFee = calculateShippingFee(request)
-  const tax = 0
-  const finalPrice = round2(totalPrice + shippingFee + tax)
+  const aggregated = aggregateBundlePricing(request, items)
 
   return {
     normalizedParams: {
@@ -718,18 +816,22 @@ export function calculateBundleQuote(request: ComplexPackagingRequest): ComplexP
       isBundle: request.isBundle,
       subItemCount: subItems.length,
     },
-    unitPrice: totalUnitPrice,
-    totalUnitPrice,
-    totalPrice,
-    shippingFee,
-    tax,
-    finalPrice,
+    unitPrice: aggregated.totalUnitPrice,
+    totalUnitPrice: aggregated.totalUnitPrice,
+    costSubtotal: aggregated.costSubtotal,
+    quotedAmount: aggregated.quotedAmount,
+    quoteMarkup: aggregated.quoteMarkup,
+    taxMultiplier: aggregated.taxMultiplier,
+    totalPrice: aggregated.totalPrice,
+    shippingFee: aggregated.shippingFee,
+    tax: aggregated.tax,
+    finalPrice: aggregated.finalPrice,
     reviewFlags: pricingReview.reviewFlags,
     reviewReasons: pricingReview.reviewReasons,
     notes: [
       ...(request.notes || []),
       ...pricingReview.reviewFlags.map((flag) => `复核提示：${flag}`),
-      request.isBundle ? '组合件结果为一期结构化预报价，适合人工复核前的快速核价。' : '复杂包装结果基于一期规则引擎生成。',
+      request.isBundle ? '组合件结果已按组件 line-item 独立计价后汇总。' : '复杂包装结果基于结构化 line-item 规则引擎生成。',
     ],
     mainItem,
     subItems,

@@ -2,9 +2,12 @@
 
 当前项目推荐只走一条部署路径：单机 Node.js 20 + PostgreSQL，按 [deploy-runbook](./deploy-runbook.md) 执行，按 [migration-baseline](./migration-baseline.md) 管理数据库迁移。
 
+试运行环境治理基线单独整理在 [trial-env-governance](./trial-env-governance.md)。
+
 ## 发布前
 
 - [ ] 使用与生产一致的 `.env` 模板，至少配置 `DATABASE_URL`、`OPENAI_API_KEY`、`ADMIN_SECRET`
+- [ ] 按 [trial-env-governance](./trial-env-governance.md) 核对当前环境，确认没有保留占位 OpenAI key、弱 ADMIN_SECRET 或 `ALLOW_SEED=true`
 - [ ] 执行 `npm ci`
 - [ ] 执行 `npm run check:launch`，覆盖 deploy 环境变量检查、`test:mvp`、`build`、`prisma migrate status`
 - [ ] 执行 `npx prisma migrate status`，确认 migration 状态正常
@@ -12,6 +15,7 @@
 - [ ] 确认当前数据库不是旧 migration 链遗留库；当前仓库应以 `20260402113000_mvp_baseline` 作为唯一基线
 - [ ] 确认生产只使用 `npx prisma migrate deploy`，不使用 `prisma migrate dev` / `prisma db push`
 - [ ] 确认后台访问保护已启用，`ADMIN_SECRET` 不是空值或默认弱口令
+- [ ] 如果当前 `.env` 曾使用过已暴露的 `OPENAI_API_KEY` 或弱 `ADMIN_SECRET`，上线前必须先完成轮换
 - [ ] 如果本地开发 `.env` 故意留空 `ADMIN_SECRET`，做部署彩排前先临时导出一个非空值再运行 `check:launch` 和 `npm start`
 - [ ] 确认生产默认不运行 `npm run seed`；如需一次性初始化演示数据，只能显式使用 `ALLOW_SEED=true npm run seed:prod:allow`
 - [ ] 确认团队知晓 learning 页面当前不是正式持久化工单系统；服务重启后 improvement/action 状态与备注不会完整保留

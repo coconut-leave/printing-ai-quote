@@ -1,5 +1,5 @@
 import { createSuccessResponse, logError } from '@/server/api/response'
-import { getLaunchEnvSummary } from '@/server/config/env'
+import { getLaunchEnvSummary, getTrialEnvGovernanceSummary } from '@/server/config/env'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,6 +9,7 @@ export async function GET() {
   const startedAt = Date.now()
   const envSummary = getLaunchEnvSummary()
   const isProduction = process.env.NODE_ENV === 'production'
+  const trialGovernance = getTrialEnvGovernanceSummary({ enforceForDeploy: isProduction })
 
   let databaseStatus: DependencyStatus = envSummary.databaseUrlConfigured ? 'ok' : 'missing_config'
 
@@ -32,11 +33,13 @@ export async function GET() {
       adminSecretRequired: isProduction,
       allowSeedEnabled: envSummary.allowSeedEnabled,
     },
+    trialGovernance,
   }
 
   const isReady = checks.database === 'ok'
     && checks.env.openAIKeyConfigured
     && (!checks.env.adminSecretRequired || checks.env.adminSecretConfigured)
+    && checks.trialGovernance.status !== 'blocked'
 
   return createSuccessResponse(
     {

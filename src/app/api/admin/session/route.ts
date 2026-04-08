@@ -12,6 +12,7 @@ import {
   getAdminSecretFromEnv,
   getMissingAdminSecretMessage,
   isProductionEnvironment,
+  shouldUseSecureAdminCookie,
 } from '@/lib/adminAccess'
 
 export const dynamic = 'force-dynamic'
@@ -111,15 +112,21 @@ export async function POST(request: NextRequest) {
         status: POST_REDIRECT_STATUS,
       })
 
+  const secureCookie = shouldUseSecureAdminCookie({
+    requestProtocol: request.nextUrl.protocol,
+    forwardedProto: request.headers.get('x-forwarded-proto'),
+    hostname: request.nextUrl.hostname,
+  })
+
   response.cookies.set(
     ADMIN_ACCESS_COOKIE_NAME,
     await createAdminSessionToken(adminSecret),
-    getAdminSessionCookieOptions()
+    getAdminSessionCookieOptions({ secure: secureCookie })
   )
   response.cookies.set(
     ADMIN_ACTOR_COOKIE_NAME,
     createAdminActorSessionValue({ actorName, actorEmail }),
-    getAdminActorCookieOptions()
+    getAdminActorCookieOptions({ secure: secureCookie })
   )
 
   return response

@@ -194,6 +194,8 @@ export function extractExplicitProductType(text: string):
   | 'leaflet_insert'
   | 'box_insert'
   | 'seal_sticker'
+  | 'foil_bag'
+  | 'carton_packaging'
   | undefined {
   const normalizedText = text.trim().toLowerCase()
 
@@ -203,6 +205,8 @@ export function extractExplicitProductType(text: string):
   if (normalizedText.includes('说明书') || normalizedText.includes('leaflet')) return 'leaflet_insert'
   if (normalizedText.includes('内托') || normalizedText.includes('insert')) return 'box_insert'
   if (normalizedText.includes('封口贴') || normalizedText.includes('透明贴纸')) return 'seal_sticker'
+  if (normalizedText.includes('铝箔袋') || normalizedText.includes('铝铂袋') || normalizedText.includes('foil bag')) return 'foil_bag'
+  if (normalizedText.includes('纸箱+包装费') || normalizedText.includes('大外箱') || normalizedText.includes('外箱') || normalizedText.includes('carton packaging')) return 'carton_packaging'
   if (normalizedText.includes('名片')) return 'business_card'
   if (normalizedText.includes('海报') || normalizedText.includes('poster')) return 'poster'
   if (normalizedText.includes('传单') || normalizedText.includes('flyer')) return 'flyer'

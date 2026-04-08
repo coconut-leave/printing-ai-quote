@@ -1,4 +1,4 @@
-import OpenAI from 'openai'
+import type OpenAI from 'openai'
 import { z } from 'zod'
 import { buildAgentRouterPrompt } from '@/server/ai/prompts/agentRouter'
 import { isEnvVarConfigured, requireOpenAIKey } from '@/server/config/env'
@@ -60,9 +60,10 @@ const routeDecisionSchema = z.object({
 
 let cachedOpenAIClient: OpenAI | null = null
 
-function getOpenAIClient(): OpenAI {
+async function getOpenAIClient(): Promise<OpenAI> {
   if (!cachedOpenAIClient) {
-    cachedOpenAIClient = new OpenAI({ apiKey: requireOpenAIKey() })
+    const { default: OpenAIClient } = await import('openai')
+    cachedOpenAIClient = new OpenAIClient({ apiKey: requireOpenAIKey() })
   }
   return cachedOpenAIClient
 }
@@ -221,7 +222,7 @@ async function classifyWithModel(input: DetectIntentInput, deps: RouteMessageDep
 }
 
 async function callModel(prompt: string): Promise<string> {
-  const client = getOpenAIClient()
+  const client = await getOpenAIClient()
   const response = await withTimeout(
     client.responses.create({
       model: 'gpt-4o-mini',

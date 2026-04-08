@@ -19,7 +19,7 @@ export function ReflectionBusinessFeedbackForm(props: ReflectionBusinessFeedback
   return (
     <div className='grid gap-3'>
       <label className='text-sm'>
-        <span className='mb-1 block font-medium text-slate-700'>问题类型</span>
+        <span className='mb-1 block font-medium text-slate-700'>学习记录类型</span>
         <select
           value={props.issueType}
           onChange={(event) => props.onIssueTypeChange(event.target.value as ReflectionIssueType)}
@@ -32,18 +32,18 @@ export function ReflectionBusinessFeedbackForm(props: ReflectionBusinessFeedback
       </label>
 
       <label className='text-sm'>
-        <span className='mb-1 block font-medium text-slate-700'>问题说明</span>
+        <span className='mb-1 block font-medium text-slate-700'>这次业务反馈</span>
         <textarea
           value={props.feedback.problemSummary || ''}
           onChange={(event) => props.onFeedbackChange('problemSummary', event.target.value)}
           rows={4}
-          placeholder='例如：客户只发了数字串，系统却把它当成画册缺参数报价。'
+          placeholder='例如：客户这次只补了说明书尺寸，系统却把 generic 说明书直接并进正式报价。'
           className='w-full rounded border border-gray-300 px-3 py-2 text-sm'
         />
       </label>
 
       <label className='text-sm'>
-        <span className='mb-1 block font-medium text-slate-700'>正确处理方式</span>
+        <span className='mb-1 block font-medium text-slate-700'>这单正确处理</span>
         <select
           value={props.feedback.correctHandling || ''}
           onChange={(event) => props.onFeedbackChange('correctHandling', event.target.value)}
@@ -57,18 +57,18 @@ export function ReflectionBusinessFeedbackForm(props: ReflectionBusinessFeedback
       </label>
 
       <label className='text-sm'>
-        <span className='mb-1 block font-medium text-slate-700'>正确结果 / 正确价格</span>
+        <span className='mb-1 block font-medium text-slate-700'>这单正确结果 / 价格</span>
         <textarea
           value={props.feedback.correctResult || ''}
           onChange={(event) => props.onFeedbackChange('correctResult', event.target.value)}
           rows={3}
-          placeholder='例如：应提示“无法识别，请重新描述”；或“正确价格应为 ¥1980”。'
+          placeholder='例如：应先给参考价并继续补信息；或“正确价格应为 ¥1000 左右”。'
           className='w-full rounded border border-gray-300 px-3 py-2 text-sm'
         />
       </label>
 
       <label className='text-sm'>
-        <span className='mb-1 block font-medium text-slate-700'>是否应该转人工</span>
+        <span className='mb-1 block font-medium text-slate-700'>这单是否应转人工</span>
         <select
           value={props.feedback.shouldHandoff || 'unsure'}
           onChange={(event) => props.onFeedbackChange('shouldHandoff', event.target.value)}
@@ -81,12 +81,12 @@ export function ReflectionBusinessFeedbackForm(props: ReflectionBusinessFeedback
       </label>
 
       <label className='text-sm'>
-        <span className='mb-1 block font-medium text-slate-700'>补充备注</span>
+        <span className='mb-1 block font-medium text-slate-700'>补充说明</span>
         <textarea
           value={props.feedback.notes || ''}
           onChange={(event) => props.onFeedbackChange('notes', event.target.value)}
           rows={3}
-          placeholder='可填写客户背景、业务判断依据或后续跟进说明。'
+          placeholder='可填写客户反馈、业务判断依据或后续跟进说明。'
           className='w-full rounded border border-gray-300 px-3 py-2 text-sm'
         />
       </label>

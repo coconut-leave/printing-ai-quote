@@ -87,6 +87,8 @@ function formatEnumValue(field: string, value: string): string {
       leaflet_insert: '说明书',
       box_insert: '内托',
       seal_sticker: '封口贴',
+      foil_bag: '铝箔袋',
+      carton_packaging: '纸箱包装',
     },
     coverPaper: {
       coated: '铜版纸',
@@ -111,6 +113,8 @@ function formatEnumValue(field: string, value: string): string {
       double_coated: '双铜纸',
       specialty_board: '特种纸板',
       clear_sticker: '透明贴纸',
+      foil_bag: '铝箔袋',
+      corrugated_carton: '瓦楞纸箱',
     },
     bindingType: {
       saddle_stitch: '骑马钉',

@@ -9,6 +9,8 @@ export type ProductType =
   | 'leaflet_insert'
   | 'box_insert'
   | 'seal_sticker'
+  | 'foil_bag'
+  | 'carton_packaging'
 
 export const SIMPLE_PRODUCT_TYPES: ProductType[] = ['album', 'flyer', 'business_card', 'poster']
 
@@ -19,6 +21,8 @@ export const COMPLEX_PACKAGING_PRODUCT_TYPES: ProductType[] = [
   'leaflet_insert',
   'box_insert',
   'seal_sticker',
+  'foil_bag',
+  'carton_packaging',
 ]
 
 export const ACTIVE_AUTO_QUOTE_PRODUCT_TYPES: ProductType[] = [...COMPLEX_PACKAGING_PRODUCT_TYPES]
@@ -232,6 +236,21 @@ const STICKER_FIELDS = [
   'stickerMaterial',
   'stickerLength',
   'stickerWidth',
+  'sizeUnit',
+]
+
+const FOIL_BAG_FIELDS = [
+  ...PACKAGING_COMMON_FIELDS,
+  'length',
+  'width',
+  'sizeUnit',
+]
+
+const CARTON_PACKAGING_FIELDS = [
+  ...PACKAGING_COMMON_FIELDS,
+  'length',
+  'width',
+  'height',
   'sizeUnit',
 ]
 
@@ -470,6 +489,50 @@ export const PRODUCT_SCHEMAS: Record<ProductType, ProductSchema> = {
       estimated: '封口贴印色或类型未确认时，可先按常见透明封口贴估算。',
     },
   },
+  foil_bag: {
+    productType: 'foil_bag',
+    nameZh: '铝箔袋',
+    defaultUnit: '个',
+    supportedFields: [...FOIL_BAG_FIELDS, ...COMMON_OPTIONAL_FIELDS],
+    fieldDisplayOrder: FOIL_BAG_FIELDS,
+    requiredFields: ['productType', 'quantity', 'length', 'width'],
+    optionalFields: ['material', 'printColor', 'surfaceFinish', 'processes', 'notes', 'sizeUnit', 'hasReferenceFile', 'referenceFileCategory', 'requiresHumanReview', ...COMMON_OPTIONAL_FIELDS],
+    fieldLabels: buildFieldLabels(FOIL_BAG_FIELDS),
+    fieldReplyExamples: buildFieldReplyExamples([...FOIL_BAG_FIELDS, ...COMMON_OPTIONAL_FIELDS]),
+    estimatedDefaults: {
+      material: 'foil_bag',
+      printColor: 'none',
+    },
+    estimated: {
+      allow: true,
+      allowedMissingFieldSets: [['material'], ['printColor'], ['material', 'printColor']],
+    },
+    statusHints: {
+      estimated: '铝箔袋若仅拿到袋型尺寸或默认空白袋信息，可先按保守模板预估。',
+    },
+  },
+  carton_packaging: {
+    productType: 'carton_packaging',
+    nameZh: '纸箱包装',
+    defaultUnit: '套',
+    supportedFields: [...CARTON_PACKAGING_FIELDS, ...COMMON_OPTIONAL_FIELDS],
+    fieldDisplayOrder: CARTON_PACKAGING_FIELDS,
+    requiredFields: ['productType', 'quantity', 'length', 'width', 'height'],
+    optionalFields: ['material', 'printColor', 'surfaceFinish', 'processes', 'notes', 'sizeUnit', 'hasReferenceFile', 'referenceFileCategory', 'requiresHumanReview', ...COMMON_OPTIONAL_FIELDS],
+    fieldLabels: buildFieldLabels(CARTON_PACKAGING_FIELDS),
+    fieldReplyExamples: buildFieldReplyExamples([...CARTON_PACKAGING_FIELDS, ...COMMON_OPTIONAL_FIELDS]),
+    estimatedDefaults: {
+      material: 'corrugated_carton',
+      printColor: 'none',
+    },
+    estimated: {
+      allow: true,
+      allowedMissingFieldSets: [['material'], ['printColor'], ['material', 'printColor']],
+    },
+    statusHints: {
+      estimated: '纸箱包装如果先按外箱/包装费模板起报，可在补充材质印刷后再收敛。',
+    },
+  },
 }
 
 export function normalizeProductType(value?: string): ProductType {
@@ -483,7 +546,9 @@ export function normalizeProductType(value?: string): ProductType {
     value === 'window_box' ||
     value === 'leaflet_insert' ||
     value === 'box_insert' ||
-    value === 'seal_sticker'
+    value === 'seal_sticker' ||
+    value === 'foil_bag' ||
+    value === 'carton_packaging'
   ) {
     return value
   }

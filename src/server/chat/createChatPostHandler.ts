@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server'
 import { extractQuoteParams, type ExtractedQuoteParams } from '@/server/ai/extractQuoteParams'
 import { routeMessage, type AgentRouteDecision } from '@/server/ai/routeMessage'
 import { calculateAlbumQuote } from '@/server/pricing/albumQuote'
@@ -611,7 +610,7 @@ function shouldClarifyComplexPackagingFollowUp(params: {
 
 function generateRecommendationUpdatedReply(patchSummary?: string, productType?: string): string {
   const summaryText = patchSummary ? `好的，这版我已经按您的意思改成：${patchSummary}。` : '好的，这版方案我已经帮您更新了。'
-  if (productType && ['mailer_box', 'tuck_end_box', 'window_box', 'leaflet_insert', 'box_insert', 'seal_sticker'].includes(productType)) {
+  if (productType && ['mailer_box', 'tuck_end_box', 'window_box', 'leaflet_insert', 'box_insert', 'seal_sticker', 'foil_bag', 'carton_packaging'].includes(productType)) {
     return `${summaryText} 如果这版可以，您继续把还没定的尺寸、材质、印色、数量或工艺发我，我就按这条线往下算。`
   }
 
@@ -625,7 +624,7 @@ function generateRerecommendedReply(reply: string, productType?: string): string
     .replace('如果这个方向对了，直接把尺寸、材质、印色、数量和工艺发我，我就按这条线继续预估。', '')
     .trim()
 
-  if (productType && ['mailer_box', 'tuck_end_box', 'window_box', 'leaflet_insert', 'box_insert', 'seal_sticker'].includes(productType)) {
+  if (productType && ['mailer_box', 'tuck_end_box', 'window_box', 'leaflet_insert', 'box_insert', 'seal_sticker', 'foil_bag', 'carton_packaging'].includes(productType)) {
     return `可以，这边给您换一版更贴近需求的方向。${normalized} 如果这版更合适，您继续把尺寸、材质、印色、数量和工艺发我，我就接着往下估。`
   }
 
@@ -705,7 +704,7 @@ export function createChatPostHandler(
           intent: typeof body.intent === 'string' ? body.intent : undefined,
           status: typeof body.status === 'string' ? body.status : undefined,
         })
-        return NextResponse.json(body)
+        return Response.json(body)
       }
 
       await addMessageToConversation(conversationId, 'CUSTOMER', payload.message)
@@ -1337,6 +1336,10 @@ export function createChatPostHandler(
       if (complexPackagingRequest) {
         const decision = decideComplexPackagingQuotePath(complexPackagingRequest)
         const quoteResult = calculateBundleQuote(complexPackagingRequest)
+        const shouldKeepFollowUpBundleEstimated = decision.status === 'quoted'
+          && Boolean(previousPackagingState)
+          && complexPackagingRequest.isBundle
+          && complexPackagingTurn.action === 'add_sub_item'
         const complexPackagingShadow = buildComplexPackagingSecondPhaseShadow({
           message: payload.message,
           phaseOneProductType: complexPackagingRequest.mainItem.productType,
@@ -1472,7 +1475,7 @@ export function createChatPostHandler(
           })
         }
 
-        if (decision.status === 'estimated') {
+        if (decision.status === 'estimated' || shouldKeepFollowUpBundleEstimated) {
           const packagingReview = buildPackagingReviewSummary({
             status: 'estimated',
             decision,

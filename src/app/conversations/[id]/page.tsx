@@ -6,10 +6,26 @@ import { useEffect, useState } from 'react'
 import { type ConversationDetailPayload, normalizeConversationDetailPayload } from '@/lib/admin/conversationDetail'
 import { ReflectionBusinessFeedbackForm } from '@/components/ReflectionBusinessFeedbackForm'
 import {
+  buildQuotedFeedbackContextSnapshot,
+  buildQuotedFeedbackStructuredFields,
+  TRIAL_REJECTION_CATEGORY_OPTIONS,
+  TRIAL_TARGET_AREA_OPTIONS,
+  type TrialReviewRejectionCategory,
+  type TrialReviewTargetArea,
+} from '@/lib/trialReviews/quotedFeedbackQuickEntry'
+import {
   buildConversationPresentation,
   getConversationStatusLabel,
   getQuoteRecordStatusLabel,
+  getTrialReviewCalibrationSignalLabel,
+  getTrialReviewDriftDirectionLabel,
   getReflectionRecordStatusLabel,
+  getTrialReviewActionLabel,
+  getTrialReviewManualConfirmationResultLabel,
+  getTrialReviewRejectionCategoryLabel,
+  getTrialReviewSourceKindLabel,
+  getTrialReviewStatusLabel,
+  getTrialReviewTargetAreaLabel,
 } from '@/lib/admin/presentation'
 import { formatParamsByProduct, getMissingFieldsChineseText } from '@/lib/catalog/helpers'
 import { AdminPageNav } from '@/components/AdminPageNav'
@@ -152,6 +168,7 @@ function PackagingReviewCard({
               </div>
               <div className='text-right'>
                 <div>数量：{item.quantity}</div>
+                {item.chargeQuantity && item.chargeQuantity !== item.quantity && <div>计费数：{item.chargeQuantity}</div>}
                 <div>单价：¥{item.unitPrice}</div>
                 <div>小计：¥{item.lineTotal}</div>
               </div>
@@ -160,7 +177,7 @@ function PackagingReviewCard({
               <div>材质 / 克重：{item.materialWeightSummary}</div>
               <div>印色：{item.printColorSummary}</div>
               <div>工艺：{item.processSummary}</div>
-              <div>开机费：¥{item.setupCost} / 运行费：¥{item.runCost}</div>
+              <div>开机费：¥{item.setupCost} / 运行费：¥{item.runCost}{typeof item.costSubtotal === 'number' ? ` / 成本小计：¥${item.costSubtotal}` : ''}</div>
             </div>
           </div>
         ))}
@@ -175,6 +192,13 @@ export default function ConversationDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [reflectionLoading, setReflectionLoading] = useState(false)
+  const [quotedFeedbackSubmitting, setQuotedFeedbackSubmitting] = useState(false)
+  const [trialOperatorName, setTrialOperatorName] = useState('')
+  const [quotedFeedbackReason, setQuotedFeedbackReason] = useState('')
+  const [quotedFeedbackNote, setQuotedFeedbackNote] = useState('')
+  const [quotedFeedbackCategory, setQuotedFeedbackCategory] = useState<TrialReviewRejectionCategory>('other')
+  const [quotedFeedbackTargetArea, setQuotedFeedbackTargetArea] = useState<TrialReviewTargetArea>('unknown')
+  const [quotedFeedbackManualFollowup, setQuotedFeedbackManualFollowup] = useState(false)
   const [reflectionIssueType, setReflectionIssueType] = useState<ReflectionIssueType>('PARAM_WRONG')
   const [businessFeedback, setBusinessFeedback] = useState<ReflectionBusinessFeedback>({ shouldHandoff: 'unsure' })
   const [packagingDraft, setPackagingDraft] = useState<PackagingCorrectedParamsDraft | null>(null)
@@ -183,6 +207,8 @@ export default function ConversationDetailPage() {
   const rawConversationId = Array.isArray(params?.id) ? params.id[0] : params?.id
   const conversationId = Number(rawConversationId)
   const latestHandoff = conversation?.handoffs?.[0]
+  const trialReviewCase = conversation?.trialReviewCase
+  const latestTrialReviewAudit = trialReviewCase?.auditLogs?.[0]
   const latestCustomerMessage = conversation?.messages
     ?.filter((message) => message.sender === 'CUSTOMER')
     .slice(-1)[0]
@@ -190,6 +216,11 @@ export default function ConversationDetailPage() {
     ?.filter((message) => message.sender === 'ASSISTANT')
     .slice(-1)[0]
   const latestQuote = conversation?.quotes?.[0]
+  const latestQuotePackagingReview = latestQuote ? buildPackagingReviewSummaryFromQuoteRecord({
+    status: latestQuote.status,
+    parameters: latestQuote.parameters,
+    pricingDetails: latestQuote.pricingDetails,
+  }) : null
   const hasCurrentExportableResult = Boolean(
     latestQuote
     || conversation?.messages?.some((message) => {
@@ -219,6 +250,15 @@ export default function ConversationDetailPage() {
       })),
     latestQuoteParameters: latestQuote?.parameters,
   }) : null
+  const quotedFeedbackContextSnapshot = buildQuotedFeedbackContextSnapshot({
+    conversationId: Number.isNaN(conversationId) ? 0 : conversationId,
+    quoteId: latestQuote?.id || null,
+    currentQuoteStatusLabel: latestQuote ? getQuoteRecordStatusLabel(latestQuote.status) : trialReviewCase?.currentQuoteStatusLabel,
+    deliveryScopeLabel: trialReviewCase?.deliveryScopeLabel || conversationPresentation?.scopeLabel || null,
+    isActiveScope: trialReviewCase?.contextSnapshot?.isActiveScope ?? true,
+    packagingSummary: latestQuotePackagingReview || undefined,
+    fallbackTitle: conversationPresentation?.title || `会话 ${conversationId}`,
+  })
   const packagingCorrectedParams = packagingDraft
     ? buildPackagingCorrectedParamsPayload(packagingDraft)
     : undefined
@@ -298,6 +338,78 @@ export default function ConversationDetailPage() {
     }))
   }, [reflectionIssueType, latestAssistantMessage?.id, latestQuote?.id])
 
+  useEffect(() => {
+    setQuotedFeedbackReason(trialReviewCase?.rejectionReason || '')
+    setQuotedFeedbackNote(trialReviewCase?.lastActionNote || '')
+    setQuotedFeedbackCategory((trialReviewCase?.rejectionCategory as TrialReviewRejectionCategory | null) || 'other')
+    setQuotedFeedbackTargetArea((trialReviewCase?.rejectionTargetArea as TrialReviewTargetArea | null) || 'unknown')
+    setQuotedFeedbackManualFollowup(trialReviewCase?.requiresHumanReview || false)
+    setTrialOperatorName(trialReviewCase?.operatorName || '')
+  }, [conversation?.id, trialReviewCase?.updatedAt])
+
+  const handleQuotedFeedbackQuickEntry = async () => {
+    if (!conversation || Number.isNaN(conversationId) || quotedFeedbackSubmitting) {
+      return
+    }
+
+    if (!trialOperatorName.trim()) {
+      setError('请先填写处理人，再登记 quoted 打回。')
+      return
+    }
+
+    if (!quotedFeedbackReason.trim()) {
+      setError('请先填写打回原因，再登记 quoted 打回。')
+      return
+    }
+
+    const structuredFields = buildQuotedFeedbackStructuredFields({
+      contextSnapshot: quotedFeedbackContextSnapshot,
+      rejectionCategory: quotedFeedbackCategory,
+      targetArea: quotedFeedbackTargetArea,
+      manualFollowupRequired: quotedFeedbackManualFollowup,
+    })
+
+    try {
+      setQuotedFeedbackSubmitting(true)
+      setError(null)
+      setSuccessMessage(null)
+
+      const res = await fetch(`/api/trial-reviews/${conversationId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          status: structuredFields.status,
+          sourceKind: structuredFields.sourceKind,
+          operatorName: trialOperatorName.trim(),
+          note: quotedFeedbackNote,
+          manualConfirmationResult: structuredFields.manualConfirmationResult,
+          rejectionReason: quotedFeedbackReason,
+          rejectionCategory: structuredFields.rejectionCategory,
+          rejectionTargetArea: structuredFields.rejectionTargetArea,
+          calibrationSignal: structuredFields.calibrationSignal,
+          driftSourceCandidate: structuredFields.driftSourceCandidate,
+          driftDirection: structuredFields.driftDirection || '',
+          requiresHumanReview: structuredFields.requiresHumanReview,
+          contextSnapshot: structuredFields.contextSnapshot,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok || !data.ok) {
+        setError(data.error || '登记 quoted 打回失败')
+        return
+      }
+
+      setSuccessMessage('当前订单已登记 quoted 打回，并写入复核留痕。')
+      await loadConversation()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '登记 quoted 打回失败')
+    } finally {
+      setQuotedFeedbackSubmitting(false)
+    }
+  }
+
   const handleGenerateReflection = async () => {
     if (!conversation || reflectionLoading) return
 
@@ -326,16 +438,16 @@ export default function ConversationDetailPage() {
       const data = await res.json()
 
       if (!res.ok || !data.ok) {
-        setError(data.message || '生成反思记录失败')
+        setError(data.message || '生成学习记录失败')
         return
       }
 
       setPackagingDraft(null)
-  setBusinessFeedback({ shouldHandoff: 'unsure' })
-      setSuccessMessage(`反思记录 #${data.data.id} 已创建，可前往反思记录页或学习看板继续查看。`)
+        setBusinessFeedback({ shouldHandoff: 'unsure' })
+      setSuccessMessage(`学习记录 #${data.data.id} 已创建，可前往学习记录页或学习看板继续查看。`)
       await loadConversation()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '生成反思记录失败')
+      setError(err instanceof Error ? err.message : '生成学习记录失败')
     } finally {
       setReflectionLoading(false)
     }
@@ -388,7 +500,7 @@ export default function ConversationDetailPage() {
         <div className='flex items-start justify-between gap-4'>
           <div>
             <h1 className='text-2xl font-bold'>{conversationPresentation?.title || `会话详情 ${conversation.id}`}</h1>
-            <p className='mt-2 text-sm text-slate-600'>{conversationPresentation?.topicSummary || '查看当前会话的消息、报价、人工接管和反思记录。'}</p>
+            <p className='mt-2 text-sm text-slate-600'>{conversationPresentation?.topicSummary || '查看当前会话的消息、报价、人工接管、当前订单打回留痕和学习记录。'}</p>
           </div>
           <div className='flex gap-3 text-sm'>
             <Link href='/conversations' className='text-blue-600 hover:underline'>
@@ -403,7 +515,7 @@ export default function ConversationDetailPage() {
               </a>
             )}
             <Link href='/reflections' className='text-blue-600 hover:underline'>
-              查看反思记录
+              查看学习记录
             </Link>
             <Link href='/learning-dashboard' className='text-blue-600 hover:underline'>
               查看学习看板
@@ -446,6 +558,155 @@ export default function ConversationDetailPage() {
             <div>
               <span className='font-medium'>更新时间：</span>
               {new Date(conversation.updatedAt).toLocaleString()}
+            </div>
+            <div>
+              <span className='font-medium'>试运行复核：</span>
+              <span className='ml-2 rounded bg-amber-100 px-3 py-1 font-medium text-amber-900'>
+                {trialReviewCase ? getTrialReviewStatusLabel(trialReviewCase.status) : '暂无复核留痕'}
+              </span>
+            </div>
+            <div>
+              <span className='font-medium'>最近复核动作：</span>
+              {latestTrialReviewAudit ? getTrialReviewActionLabel(latestTrialReviewAudit.actionType) : '暂无'}
+            </div>
+          </div>
+
+          <div className='mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4'>
+            <div className='flex flex-col gap-3 md:flex-row md:items-start md:justify-between'>
+              <div>
+                <p className='text-sm font-semibold text-amber-950'>试运行复核状态</p>
+                {trialReviewCase ? (
+                  <div className='mt-2 space-y-1 text-sm text-amber-900'>
+                    <div>当前状态：{getTrialReviewStatusLabel(trialReviewCase.status)}</div>
+                    <div>复核来源：{getTrialReviewSourceKindLabel(trialReviewCase.sourceKind)}</div>
+                    {trialReviewCase.currentQuoteStatusLabel && <div>当前口径：{trialReviewCase.currentQuoteStatusLabel}</div>}
+                    {trialReviewCase.deliveryScopeLabel && <div>交付口径：{trialReviewCase.deliveryScopeLabel}</div>}
+                    {trialReviewCase.operatorName && <div>处理人：{trialReviewCase.operatorName}</div>}
+                    {latestTrialReviewAudit && <div>最近动作：{getTrialReviewActionLabel(latestTrialReviewAudit.actionType)}</div>}
+                    {trialReviewCase.manualConfirmationResult && <div>人工确认结论：{getTrialReviewManualConfirmationResultLabel(trialReviewCase.manualConfirmationResult)}</div>}
+                    {trialReviewCase.lastActionNote && <div>处理备注：{trialReviewCase.lastActionNote}</div>}
+                    {trialReviewCase.rejectionReason && <div>打回原因：{trialReviewCase.rejectionReason}</div>}
+                    {trialReviewCase.rejectionCategory && <div>打回分类：{getTrialReviewRejectionCategoryLabel(trialReviewCase.rejectionCategory)}</div>}
+                    {trialReviewCase.rejectionTargetArea && <div>打回目标区段：{getTrialReviewTargetAreaLabel(trialReviewCase.rejectionTargetArea)}</div>}
+                    {trialReviewCase.calibrationSignal && <div>Calibration 信号：{getTrialReviewCalibrationSignalLabel(trialReviewCase.calibrationSignal)}</div>}
+                    {trialReviewCase.driftSourceCandidate && <div>疑似漂移源：{trialReviewCase.driftSourceCandidate}</div>}
+                    {trialReviewCase.driftDirection && <div>同向漂移方向：{getTrialReviewDriftDirectionLabel(trialReviewCase.driftDirection)}</div>}
+                    {trialReviewCase.contextSnapshot?.currentPathLabel && <div>当前主路径：{String(trialReviewCase.contextSnapshot.currentPathLabel)}</div>}
+                    {trialReviewCase.contextSnapshot?.bundleTypeLabel && <div>组合类型：{String(trialReviewCase.contextSnapshot.bundleTypeLabel)}</div>}
+                    {'isActiveScope' in (trialReviewCase.contextSnapshot || {}) && <div>试运行范围：{trialReviewCase.contextSnapshot?.isActiveScope ? '当前范围内' : '当前范围外'}</div>}
+                    {trialReviewCase.queueReason && <div>入队原因：{trialReviewCase.queueReason}</div>}
+                    {trialReviewCase.manualConfirmedAt && <div>人工确认时间：{new Date(trialReviewCase.manualConfirmedAt).toLocaleString()}</div>}
+                    {trialReviewCase.closedAt && <div>关闭时间：{new Date(trialReviewCase.closedAt).toLocaleString()}</div>}
+                  </div>
+                ) : (
+                  <div className='mt-2 space-y-1 text-sm text-amber-900'>
+                    <div>当前详情页还没有复核留痕。</div>
+                    <div>如该会话属于参考报价、人工处理或人工跟进路径，请到试运行复核队列确认状态。</div>
+                  </div>
+                )}
+              </div>
+              <div className='flex gap-2'>
+                <Link href='/trial-reviews' className='rounded border border-amber-300 bg-white px-3 py-2 text-sm text-amber-900 hover:bg-amber-100'>
+                  打开复核队列
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          <div className='mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4'>
+            <div className='flex flex-col gap-3 md:flex-row md:items-start md:justify-between'>
+              <div>
+                <p className='text-sm font-semibold text-slate-900'>当前订单 quoted 打回快捷登记</p>
+                <p className='mt-1 text-sm text-slate-600'>这里只处理当前订单的打回动作。系统会自动带入会话、报价、主路径、组合类型、当前口径和试运行范围。</p>
+              </div>
+              <Link href='/trial-reviews' className='rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-100'>
+                查看周度归档
+              </Link>
+            </div>
+
+            <div className='mt-4 flex flex-wrap gap-2 text-xs text-slate-600'>
+              <span className='rounded-full bg-white px-3 py-1'>会话 #{conversation.id}</span>
+              {quotedFeedbackContextSnapshot.quoteId && <span className='rounded-full bg-white px-3 py-1'>报价 #{quotedFeedbackContextSnapshot.quoteId}</span>}
+              <span className='rounded-full bg-white px-3 py-1'>{quotedFeedbackContextSnapshot.currentPathLabel}</span>
+              <span className='rounded-full bg-white px-3 py-1'>{quotedFeedbackContextSnapshot.bundleTypeLabel}</span>
+              <span className='rounded-full bg-white px-3 py-1'>{quotedFeedbackContextSnapshot.currentQuoteStatusLabel}</span>
+              <span className='rounded-full bg-white px-3 py-1'>{quotedFeedbackContextSnapshot.deliveryScopeLabel}</span>
+              <span className='rounded-full bg-white px-3 py-1'>{quotedFeedbackContextSnapshot.isActiveScope ? 'trial 范围内' : 'trial 范围外'}</span>
+            </div>
+
+            <div className='mt-4 grid gap-4 md:grid-cols-2'>
+              <label className='text-sm text-slate-700'>
+                处理人
+                <input
+                  value={trialOperatorName}
+                  onChange={(event) => setTrialOperatorName(event.target.value)}
+                  placeholder='如 张三 / sales-01'
+                  className='mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2'
+                />
+              </label>
+              <label className='text-sm text-slate-700'>
+                打回分类
+                <select
+                  value={quotedFeedbackCategory}
+                  onChange={(event) => setQuotedFeedbackCategory(event.target.value as TrialReviewRejectionCategory)}
+                  className='mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2'
+                >
+                  {TRIAL_REJECTION_CATEGORY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className='text-sm text-slate-700'>
+                打回目标区段
+                <select
+                  value={quotedFeedbackTargetArea}
+                  onChange={(event) => setQuotedFeedbackTargetArea(event.target.value as TrialReviewTargetArea)}
+                  className='mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2'
+                >
+                  {TRIAL_TARGET_AREA_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className='text-sm text-slate-700'>
+                打回原因
+                <input
+                  value={quotedFeedbackReason}
+                  onChange={(event) => setQuotedFeedbackReason(event.target.value)}
+                  placeholder='如：客户反馈当前正式报价偏高，需要回退或人工确认。'
+                  className='mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2'
+                />
+              </label>
+              <label className='text-sm text-slate-700 md:col-span-2'>
+                处理备注
+                <textarea
+                  value={quotedFeedbackNote}
+                  onChange={(event) => setQuotedFeedbackNote(event.target.value)}
+                  placeholder='记录客户反馈、业务判断和后续跟进动作。'
+                  className='mt-1 min-h-24 w-full rounded-lg border border-slate-300 bg-white px-3 py-2'
+                />
+              </label>
+              <label className='flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 md:col-span-2'>
+                <input
+                  type='checkbox'
+                  checked={quotedFeedbackManualFollowup}
+                  onChange={(event) => setQuotedFeedbackManualFollowup(event.target.checked)}
+                  className='h-4 w-4 rounded border-slate-300'
+                />
+                打回后需要人工继续跟进
+              </label>
+            </div>
+
+            <div className='mt-4 flex flex-wrap items-center gap-3'>
+              <button
+                type='button'
+                onClick={handleQuotedFeedbackQuickEntry}
+                disabled={quotedFeedbackSubmitting || !trialOperatorName.trim() || !quotedFeedbackReason.trim()}
+                className='rounded bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50'
+              >
+                {quotedFeedbackSubmitting ? '登记中...' : '登记当前订单打回'}
+              </button>
+              <div className='text-xs text-slate-500'>登记后会同步写入 review observation、audit trail 和周度 drift 归档；不会替代学习记录。</div>
             </div>
           </div>
 
@@ -604,12 +865,35 @@ export default function ConversationDetailPage() {
           </div>
         </div>
 
-        {/* 反思记录 */}
+        {trialReviewCase && trialReviewCase.auditLogs.length > 0 && (
+          <div className='rounded-lg bg-white p-6 shadow'>
+            <h2 className='mb-4 text-lg font-semibold'>试运行复核留痕 ({trialReviewCase.auditLogs.length})</h2>
+            <div className='space-y-3'>
+              {trialReviewCase.auditLogs.map((audit) => (
+                <div key={audit.id} className='rounded border p-4'>
+                  <div className='mb-2 flex items-center justify-between'>
+                    <span className='font-medium'>{getTrialReviewActionLabel(audit.actionType)}</span>
+                    <span className='rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700'>
+                      {getTrialReviewStatusLabel(audit.toStatus)}
+                    </span>
+                  </div>
+                  {audit.operatorName && <p className='mb-2 text-sm'><span className='font-medium'>处理人：</span>{audit.operatorName}</p>}
+                  {audit.note && <p className='mb-2 text-sm'><span className='font-medium'>备注：</span>{audit.note}</p>}
+                  <div className='text-xs text-gray-500'>
+                    创建时间：{new Date(audit.createdAt).toLocaleString()}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 学习记录 */}
         <div className='rounded-lg bg-white p-6 shadow'>
           <div className='mb-4 flex items-center justify-between'>
             <div>
-              <h2 className='text-lg font-semibold'>反思记录 ({conversation.reflections?.length || 0})</h2>
-              <p className='mt-1 text-sm text-slate-500'>在当前会话详情中可直接生成反思记录，生成后可在反思记录页与学习看板继续查看。</p>
+              <h2 className='text-lg font-semibold'>学习记录 ({conversation.reflections?.length || 0})</h2>
+              <p className='mt-1 text-sm text-slate-500'>这里是可选的学习/复盘记录，不会直接改动当前订单处理结果；当前订单打回请使用上面的快捷登记。</p>
             </div>
             <button
               type='button'
@@ -617,7 +901,7 @@ export default function ConversationDetailPage() {
               disabled={reflectionLoading}
               className='rounded bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50'
             >
-              {reflectionLoading ? '生成中...' : '生成反思记录'}
+              {reflectionLoading ? '生成中...' : '补一条学习记录'}
             </button>
           </div>
 
@@ -631,7 +915,7 @@ export default function ConversationDetailPage() {
 
             {showPackagingTemplate && packagingDraft && (
               <div className='rounded border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800'>
-                当前会话带有复杂包装结构，系统会在后台自动保留现有包装上下文，并把您填写的业务反馈一起写入反思记录，无需手动编辑 JSON。
+                当前会话带有复杂包装结构，系统会在后台自动保留现有包装上下文，并把您填写的业务反馈一起写入学习记录，无需手动编辑 JSON。
               </div>
             )}
           </div>
@@ -645,8 +929,8 @@ export default function ConversationDetailPage() {
                     {getReflectionRecordStatusLabel(item.status)}
                   </span>
                 </div>
-                <p className='mb-2 text-sm'><span className='font-medium'>反思：</span>{item.reflectionText}</p>
-                <p className='text-sm'><span className='font-medium'>建议草案：</span>{item.suggestionDraft}</p>
+                <p className='mb-2 text-sm'><span className='font-medium'>学习内容：</span>{item.reflectionText}</p>
+                <p className='text-sm'><span className='font-medium'>处理建议：</span>{item.suggestionDraft}</p>
                 {extractReflectionBusinessFeedback(item.correctedParams) && (
                   <p className='mt-2 text-sm text-slate-700 whitespace-pre-wrap'>
                     <span className='font-medium'>业务反馈：</span>
@@ -670,7 +954,7 @@ export default function ConversationDetailPage() {
               </div>
             ))}
             {(conversation.reflections?.length || 0) === 0 && (
-              <p className='text-gray-500'>暂无反思记录</p>
+              <p className='text-gray-500'>暂无学习记录</p>
             )}
           </div>
         </div>

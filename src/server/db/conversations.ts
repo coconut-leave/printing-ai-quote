@@ -143,6 +143,16 @@ export async function getConversationWithDetails(conversationId: number) {
       reflections: {
         orderBy: { createdAt: 'desc' },
       },
+      trialReviewCase: {
+        include: {
+          auditLogs: {
+            orderBy: [
+              { createdAt: 'desc' },
+              { id: 'desc' },
+            ],
+          },
+        },
+      },
     },
   })
 }
@@ -282,6 +292,17 @@ export async function listConversations(options: ConversationListOptions = {}) {
         orderBy: { createdAt: 'desc' },
         take: 1,
       },
+      trialReviewCase: {
+        include: {
+          auditLogs: {
+            orderBy: [
+              { createdAt: 'desc' },
+              { id: 'desc' },
+            ],
+            take: 1,
+          },
+        },
+      },
     },
   })
 }
@@ -299,6 +320,17 @@ export async function listConversationsForExport(options: ConversationListOption
       },
       quotes: {
         orderBy: { createdAt: 'desc' },
+      },
+      trialReviewCase: {
+        include: {
+          auditLogs: {
+            orderBy: [
+              { createdAt: 'desc' },
+              { id: 'desc' },
+            ],
+            take: 1,
+          },
+        },
       },
     },
   })

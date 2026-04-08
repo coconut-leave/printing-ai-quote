@@ -20,6 +20,7 @@ model Conversation {
   handoffs      HandoffRecord[]
   feedbacks     FeedbackAnnotation[]
   reflections   ReflectionRecord[]
+  trialReviewCase TrialReviewCase?
 }
 
 enum ConversationStatus {
@@ -72,6 +73,7 @@ model Quote {
   updatedAt         DateTime          @updatedAt
   feedbacks         FeedbackAnnotation[]
   reflections       ReflectionRecord[]
+  trialReviewCases  TrialReviewCase[]
 }
 
 enum QuoteStatus {
@@ -202,6 +204,29 @@ enum ReflectionStatus {
   REJECTED
 }
 
+enum TrialReviewStatus {
+  PENDING_REVIEW
+  MANUAL_CONFIRMED
+  RETURNED_AS_ESTIMATE
+  HANDOFF_TO_HUMAN
+  CLOSED
+}
+
+enum TrialReviewSourceKind {
+  REFERENCE_QUOTE
+  MANUAL_REVIEW
+  HUMAN_FOLLOWUP
+  QUOTED_FEEDBACK
+}
+
+enum TrialReviewActionType {
+  QUEUED
+  MANUAL_CONFIRMED
+  RETURNED_AS_ESTIMATE
+  HANDOFF_TO_HUMAN
+  CLOSED
+}
+
 model ReflectionRecord {
   id                     Int                 @id @default(autoincrement())
   conversation           Conversation        @relation(fields: [conversationId], references: [id])
@@ -219,5 +244,54 @@ model ReflectionRecord {
   createdAt              DateTime            @default(now())
 
   @@index([conversationId, createdAt])
+}
+
+model TrialReviewCase {
+  id                    Int                   @id @default(autoincrement())
+  conversation          Conversation          @relation(fields: [conversationId], references: [id])
+  conversationId        Int                   @unique
+  quote                 Quote?                @relation(fields: [quoteId], references: [id])
+  quoteId               Int?
+  status                TrialReviewStatus     @default(PENDING_REVIEW)
+  sourceKind            TrialReviewSourceKind
+  sourceFingerprint     String
+  queueReason           String
+  queueReasonCode       String?
+  deliveryScopeLabel    String?
+  deliveryScopeNote     String?
+  currentQuoteStatusLabel String?
+  requiresHumanReview   Boolean               @default(false)
+  operatorName          String?
+  lastActionNote        String?
+  manualConfirmationResult String?
+  rejectionReason       String?
+  rejectionCategory     String?
+  rejectionTargetArea   String?
+  calibrationSignal     String?
+  driftSourceCandidate  String?
+  driftDirection        String?
+  contextSnapshot       Json?
+  manualConfirmedAt     DateTime?
+  closedAt              DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  auditLogs             TrialReviewAuditLog[]
+
+  @@index([status, updatedAt])
+  @@index([sourceKind, updatedAt])
+}
+
+model TrialReviewAuditLog {
+  id             Int                 @id @default(autoincrement())
+  reviewCase     TrialReviewCase     @relation(fields: [reviewCaseId], references: [id])
+  reviewCaseId   Int
+  fromStatus     TrialReviewStatus?
+  toStatus       TrialReviewStatus
+  actionType     TrialReviewActionType
+  operatorName   String?
+  note           String?
+  createdAt      DateTime            @default(now())
+
+  @@index([reviewCaseId, createdAt])
 }
 

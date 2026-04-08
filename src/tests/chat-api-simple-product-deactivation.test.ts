@@ -114,7 +114,7 @@ async function initializeTestRuntime() {
     return
   }
 
-  const routeModule = await import('@/server/chat/createChatPostHandler')
+  const routeModule = await import('@/server/chat/createChatPostHandler') as Record<string, any>
 
   const createChatPostHandler = typeof routeModule.createChatPostHandler === 'function'
     ? routeModule.createChatPostHandler

@@ -1,4 +1,5 @@
 import dotenv from 'dotenv'
+import { getTrialEnvGovernanceSummary } from '@/server/config/env'
 
 dotenv.config({ path: './.env' })
 
@@ -13,6 +14,16 @@ if (missingEnvNames.length > 0) {
   console.error('Launch env check failed.')
   console.error(`Missing required deploy env vars: ${missingEnvNames.join(', ')}`)
   console.error('For deploy rehearsal and production, DATABASE_URL, OPENAI_API_KEY, and ADMIN_SECRET must all be non-empty.')
+  process.exit(1)
+}
+
+const governanceSummary = getTrialEnvGovernanceSummary({ enforceForDeploy: true })
+
+if (governanceSummary.status === 'blocked') {
+  console.error('Launch env governance check failed.')
+  for (const issue of governanceSummary.blockingIssues) {
+    console.error(`- ${issue}`)
+  }
   process.exit(1)
 }
 

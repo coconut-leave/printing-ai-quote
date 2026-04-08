@@ -8,7 +8,7 @@ interface TestResult {
 
 const results: TestResult[] = []
 
-function assert(condition: boolean, message: string) {
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message)
   }
@@ -89,7 +89,7 @@ test('真实窗口片复合串会在 shadow payload 中保留 estimated 差异',
   assert(Boolean(payload), '应生成 shadow payload')
   assert(payload?.shadowStatus === 'estimated', '窗口片组合应在 shadow 中降为 estimated')
   assert(payload?.statusReasons.includes('unsupported_window_feature') === true, '应标记 unsupported_window_feature')
-  assert(payload?.lineItems.some((line) => line.lineCode === 'manual_adjustment') === true, '应保留人工修正项')
+  assert(payload?.lineItems?.some((line) => line.lineCode === 'manual_adjustment') === true, '应保留人工修正项')
   assert(payload?.diffSummary.manualAdjustmentPresent === true, '应显式记录 manual_adjustment 是否出现')
   assert(payload?.diffSummary.statusAligned === false, '应与 phase-one quoted 形成状态差异')
   assert(payload?.diffSummary.enteredDeferredOrHandoff === false, '窗口片 estimated 仍不应被误记为 handoff/deferred')
@@ -119,7 +119,7 @@ test('特材代号复合串会在 shadow payload 中直接 handoff', () => {
   assert(Boolean(payload), '应生成 shadow payload')
   assert(payload?.shadowStatus === 'handoff_required', '特材代号应直接 handoff')
   assert(payload?.statusReasons.includes('unsupported_material_code') === true, '应标记 unsupported_material_code')
-  assert(payload?.lineItems.some((line) => line.lineCode === 'manual_adjustment') === true, '应保留人工修正项')
+  assert(payload?.lineItems?.some((line) => line.lineCode === 'manual_adjustment') === true, '应保留人工修正项')
   assert(payload?.diffSummary.statusAligned === false, '应与 phase-one quoted 形成状态差异')
   assert(payload?.diffSummary.enteredDeferredOrHandoff === true, 'handoff 样本应显式记录进入 deferred/handoff 观察')
 })

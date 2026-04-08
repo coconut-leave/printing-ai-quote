@@ -12,11 +12,11 @@ export type ReflectionBusinessFeedback = {
 
 export const REFLECTION_BUSINESS_HANDLING_OPTIONS = [
   '应推荐方案',
-  '应补参数',
-  '应给参考报价',
+  '应先补信息',
+  '应给参考价',
   '应正式报价',
   '应转人工',
-  '应澄清需求',
+  '应先澄清需求',
   '其他',
 ] as const
 
@@ -31,14 +31,14 @@ export const REFLECTION_BUSINESS_ISSUE_TYPE_OPTIONS: Array<{ value: ReflectionIs
   { value: 'PARAM_MISSING', label: '漏问参数 / 缺参数追问不对' },
   { value: 'QUOTE_INACCURATE', label: '价格不对 / 误报价' },
   { value: 'SHOULD_HANDOFF', label: '不应继续报价，应转人工' },
-  { value: 'PACKAGING_PARAM_WRONG', label: '包装识别错误' },
-  { value: 'PACKAGING_PARAM_MISSING', label: '包装缺参数' },
-  { value: 'BUNDLE_STRUCTURE_WRONG', label: '子项 / 组合关系错误' },
+  { value: 'PACKAGING_PARAM_WRONG', label: '包装识别不对' },
+  { value: 'PACKAGING_PARAM_MISSING', label: '包装信息没问全' },
+  { value: 'BUNDLE_STRUCTURE_WRONG', label: '主件 / 配件归属不对' },
   { value: 'PACKAGING_PRICE_INACCURATE', label: '包装价格不对' },
-  { value: 'PACKAGING_REVIEW_REASON_WRONG', label: '复核 / 转人工理由错误' },
-  { value: 'SHOULD_ESTIMATE_BUT_QUOTED', label: '误正式报价，应给参考价' },
-  { value: 'SHOULD_HANDOFF_BUT_NOT', label: '应转人工未转人工' },
-  { value: 'SHOULD_QUOTED_BUT_ESTIMATED', label: '漏正式报价，只给了参考价' },
+  { value: 'PACKAGING_REVIEW_REASON_WRONG', label: '转人工 / 参考价理由不对' },
+  { value: 'SHOULD_ESTIMATE_BUT_QUOTED', label: '这单该给参考价，不该正式报价' },
+  { value: 'SHOULD_HANDOFF_BUT_NOT', label: '这单该转人工，但系统没转' },
+  { value: 'SHOULD_QUOTED_BUT_ESTIMATED', label: '这单可以正式报价，不该只给参考价' },
 ]
 
 function isObject(value: unknown): value is JsonRecord {
@@ -112,12 +112,12 @@ export function buildReflectionBusinessFeedbackSummary(feedback?: ReflectionBusi
   }
 
   return [
-    normalized.problemSummary ? `问题说明：${normalized.problemSummary}` : '',
-    normalized.correctHandling ? `正确处理：${normalized.correctHandling}` : '',
-    normalized.correctResult ? `正确结果：${normalized.correctResult}` : '',
+    normalized.problemSummary ? `这次业务反馈：${normalized.problemSummary}` : '',
+    normalized.correctHandling ? `这单正确处理：${normalized.correctHandling}` : '',
+    normalized.correctResult ? `这单正确结果：${normalized.correctResult}` : '',
     normalized.shouldHandoff
-      ? `是否转人工：${normalized.shouldHandoff === 'yes' ? '是' : normalized.shouldHandoff === 'no' ? '否' : '待判断'}`
+      ? `这单是否应转人工：${normalized.shouldHandoff === 'yes' ? '是' : normalized.shouldHandoff === 'no' ? '否' : '待判断'}`
       : '',
-    normalized.notes ? `补充备注：${normalized.notes}` : '',
+    normalized.notes ? `补充说明：${normalized.notes}` : '',
   ].filter(Boolean).join('；')
 }

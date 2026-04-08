@@ -11,11 +11,13 @@ import type {
   ComplexPackagingRequest,
   ComplexPackagingReviewReason,
   ComplexPackagingRouteStatus,
+  PricingTrialBundleGateStatus,
+  PricingTrialGateStatus,
 } from '@/server/packaging/types'
 
 type PackagingReviewInput = {
   status: ComplexPackagingRouteStatus
-  decision?: Pick<ComplexPackagingDecision, 'reason' | 'missingDetails' | 'missingFields'>
+  decision?: Pick<ComplexPackagingDecision, 'reason' | 'reasonText' | 'trialGateStatus' | 'trialBundleGateStatus' | 'missingDetails' | 'missingFields'>
   request?: ComplexPackagingRequest | null
   quoteResult?: ComplexPackagingQuoteResult | null
   referenceFiles?: SampleFileMetadata[]
@@ -26,11 +28,14 @@ export type PackagingReviewLineItemView = {
   itemType: ComplexPackagingProductType
   itemTypeLabel: string
   title: string
+  pricingModel?: string
   quantity: number
+  chargeQuantity?: number
   normalizedSpecSummary: string
   materialWeightSummary: string
   printColorSummary: string
   processSummary: string
+  costSubtotal?: number
   setupCost: number
   runCost: number
   unitPrice: number
@@ -54,6 +59,8 @@ export type PackagingReviewSummaryView = {
   statusLabel: string
   statusReasonCode?: string
   statusReasonText: string
+  trialGateStatus?: PricingTrialGateStatus
+  trialBundleGateStatus?: PricingTrialBundleGateStatus
   conciseExplanation: string
   requiresHumanReview: boolean
   reviewFlags: string[]
@@ -63,7 +70,9 @@ export type PackagingReviewSummaryView = {
   subItems: PackagingReviewLineItemView[]
   lineItems: PackagingReviewLineItemView[]
   missingDetails: PackagingMissingDetailView[]
+  costSubtotal?: number
   subtotal?: number
+  quotedAmount?: number
   shippingFee?: number
   finalPrice?: number
   totalUnitPrice?: number
@@ -85,6 +94,8 @@ const PRODUCT_TYPE_LABELS: Record<ComplexPackagingProductType, string> = {
   leaflet_insert: '说明书',
   box_insert: '内托',
   seal_sticker: '封口贴',
+  foil_bag: '铝箔袋',
+  carton_packaging: '纸箱包装',
 }
 
 const STATUS_LABELS: Record<ComplexPackagingRouteStatus, string> = {
@@ -98,8 +109,16 @@ const STATUS_REASON_TEXT: Record<string, string> = {
   all_packaging_fields_present: '当前复杂包装参数已齐全，可按结构化规则生成报价。',
   allowed_packaging_estimated_missing_set: '当前缺失字段仍在允许预估范围内，系统先按预报价处理。',
   bundle_prequote: '当前为主件加配套件组合报价，默认先走预报价并建议人工复核。',
+  trial_scope_allowed_quoted: '当前路径属于试运行允许正式报价范围。',
+  trial_scope_estimated_only: '当前路径在试运行内只允许参考报价。',
+  trial_scope_handoff_only: '当前路径在试运行内只允许人工兜底。',
+  trial_standard_bundle_quoted: '当前组合属于试运行允许正式报价范围。',
+  trial_bundle_estimated_only: '当前组合在试运行内只允许参考报价。',
+  trial_bundle_handoff_only: '当前组合在试运行内只允许人工兜底。',
   requires_human_review: '当前案例已命中人工复核条件，结果保留为预报价。',
   pricing_uncertainty_requires_review: '当前价格假设存在不确定性，建议人工复核后确认。',
+  line_item_template_incomplete: '当前已能套入真实报价模板，但仍有少量非关键类别项依赖保守假设，先按预报价处理。',
+  blocking_workbook_line_item: '当前关键类别项或关键术语无法稳定落入真实报价表，建议转人工复核。',
   reference_file_with_missing_fields: '当前既有参考文件又缺少关键字段，默认转人工复核。',
   bundle_item_fields_missing: '组合件中仍有子项缺少关键参数，需要继续补充。',
   packaging_required_fields_missing: '当前复杂包装关键信息仍不足，需要继续补充。',
@@ -154,6 +173,8 @@ function normalizeLineItemView(value: unknown): PackagingReviewLineItemView | nu
 
   const itemType = typeof record.itemType === 'string' ? record.itemType as ComplexPackagingProductType : undefined
   const quantity = normalizeOptionalNumber(record.quantity) ?? 0
+  const chargeQuantity = normalizeOptionalNumber(record.chargeQuantity)
+  const costSubtotal = normalizeOptionalNumber(record.costSubtotal)
   const setupCost = normalizeOptionalNumber(record.setupCost) ?? 0
   const runCost = normalizeOptionalNumber(record.runCost) ?? 0
   const unitPrice = normalizeOptionalNumber(record.unitPrice) ?? 0
@@ -169,11 +190,14 @@ function normalizeLineItemView(value: unknown): PackagingReviewLineItemView | nu
     title: typeof record.title === 'string' && record.title.trim()
       ? record.title.trim()
       : getProductTypeLabel(itemType),
+    pricingModel: typeof record.pricingModel === 'string' ? record.pricingModel : undefined,
     quantity,
+    chargeQuantity,
     normalizedSpecSummary: typeof record.normalizedSpecSummary === 'string' ? record.normalizedSpecSummary : '暂无规格摘要',
     materialWeightSummary: typeof record.materialWeightSummary === 'string' ? record.materialWeightSummary : '暂无材质信息',
     printColorSummary: typeof record.printColorSummary === 'string' ? record.printColorSummary : '暂无印色信息',
     processSummary: typeof record.processSummary === 'string' ? record.processSummary : '暂无工艺信息',
+    costSubtotal,
     setupCost,
     runCost,
     unitPrice,
@@ -233,6 +257,14 @@ function getItemDimensionsText(item: ComplexPackagingItem): string {
     case 'seal_sticker': {
       if (!item.stickerLength || !item.stickerWidth) return '贴纸尺寸待补充'
       return `${item.stickerLength}×${item.stickerWidth}${item.sizeUnit || 'mm'}`
+    }
+    case 'foil_bag': {
+      if (!item.length || !item.width) return '袋型尺寸待补充'
+      return `${item.length}×${item.width}${item.sizeUnit || 'mm'}`
+    }
+    case 'carton_packaging': {
+      if (!item.length || !item.width || !item.height) return '纸箱尺寸待补充'
+      return `${item.length}×${item.width}×${item.height}${item.sizeUnit || 'mm'}`
     }
     default:
       return '规格待补充'
@@ -329,11 +361,14 @@ function mapLineItem(item: ComplexPackagingLineQuote): PackagingReviewLineItemVi
     itemType: item.itemType,
     itemTypeLabel: getProductTypeLabel(item.itemType),
     title: item.title,
+    pricingModel: item.pricingModel,
     quantity: item.quantity,
+    chargeQuantity: item.chargeQuantity,
     normalizedSpecSummary: getNormalizedSpecSummary(item.normalizedParams),
     materialWeightSummary: getMaterialWeightSummary(item.normalizedParams),
     printColorSummary: getPrintColorSummary(item.normalizedParams),
     processSummary: getProcessSummary(item.normalizedParams),
+    costSubtotal: item.costSubtotal,
     setupCost: item.setupCost,
     runCost: item.runCost,
     unitPrice: item.unitPrice,
@@ -369,7 +404,11 @@ function dedupeReviewReasons(reviewReasons: ComplexPackagingReviewReason[]): Com
   return result
 }
 
-function buildStatusReasonText(status: ComplexPackagingRouteStatus, reason?: string): string {
+function buildStatusReasonText(status: ComplexPackagingRouteStatus, reason?: string, reasonText?: string): string {
+  if (reasonText && reasonText.trim()) {
+    return reasonText.trim()
+  }
+
   if (!reason) {
     return status === 'quoted'
       ? '当前包装报价结果可直接查看。'
@@ -416,11 +455,14 @@ export function buildPackagingReviewSummary(input: PackagingReviewInput): Packag
       itemType: item.productType,
       itemTypeLabel: getProductTypeLabel(item.productType),
       title: item.title || getProductTypeLabel(item.productType),
+      pricingModel: undefined,
       quantity: item.quantity || 0,
+      chargeQuantity: item.chargeQuantity,
       normalizedSpecSummary: getNormalizedSpecSummary(item),
       materialWeightSummary: getMaterialWeightSummary(item),
       printColorSummary: getPrintColorSummary(item),
       processSummary: getProcessSummary(item),
+      costSubtotal: undefined,
       setupCost: 0,
       runCost: 0,
       unitPrice: 0,
@@ -443,7 +485,7 @@ export function buildPackagingReviewSummary(input: PackagingReviewInput): Packag
     ...lineItems.flatMap((item) => item.reviewFlags || []),
   ]))
   const missingDetails = mapMissingDetails(input.decision?.missingDetails || [])
-  const statusReasonText = buildStatusReasonText(input.status, input.decision?.reason)
+  const statusReasonText = buildStatusReasonText(input.status, input.decision?.reason, input.decision?.reasonText)
   const includedComponents = lineItems.map((item) => item.title)
 
   const summary: PackagingReviewSummaryView = {
@@ -451,6 +493,8 @@ export function buildPackagingReviewSummary(input: PackagingReviewInput): Packag
     statusLabel: STATUS_LABELS[input.status],
     statusReasonCode: input.decision?.reason,
     statusReasonText,
+    trialGateStatus: input.decision?.trialGateStatus,
+    trialBundleGateStatus: input.decision?.trialBundleGateStatus,
     conciseExplanation: '',
     requiresHumanReview: Boolean(input.requiresHumanReview || input.quoteResult?.requiresHumanReview || reviewReasons.length > 0),
     reviewFlags,
@@ -460,7 +504,9 @@ export function buildPackagingReviewSummary(input: PackagingReviewInput): Packag
     subItems: lineItems.slice(1),
     lineItems,
     missingDetails,
+    costSubtotal: input.quoteResult?.costSubtotal,
     subtotal: input.quoteResult?.totalPrice,
+    quotedAmount: input.quoteResult?.quotedAmount,
     shippingFee: input.quoteResult?.shippingFee,
     finalPrice: input.quoteResult?.finalPrice,
     totalUnitPrice: input.quoteResult?.totalUnitPrice,
@@ -486,6 +532,10 @@ export function buildPackagingReviewSummaryFromQuoteRecord(input: QuoteRecordInp
       normalizedParams: parameters,
       unitPrice: Number(pricingDetails.unitPrice ?? pricingDetails.totalUnitPrice ?? 0),
       totalUnitPrice: Number(pricingDetails.totalUnitPrice ?? pricingDetails.unitPrice ?? 0),
+      costSubtotal: Number(pricingDetails.costSubtotal ?? pricingDetails.totalPrice ?? 0),
+      quotedAmount: Number(pricingDetails.quotedAmount ?? pricingDetails.totalPrice ?? 0),
+      quoteMarkup: Number(pricingDetails.quoteMarkup ?? 1),
+      taxMultiplier: Number(pricingDetails.taxMultiplier ?? 1),
       totalPrice: Number(pricingDetails.totalPrice ?? 0),
       shippingFee: Number(pricingDetails.shippingFee ?? 0),
       tax: Number(pricingDetails.tax ?? 0),
@@ -535,6 +585,10 @@ export function normalizePackagingReviewSummaryView(value: unknown): PackagingRe
       ? record.statusLabel.trim()
       : STATUS_LABELS[status],
     statusReasonCode: typeof record.statusReasonCode === 'string' ? record.statusReasonCode : undefined,
+    trialGateStatus: typeof record.trialGateStatus === 'string' ? record.trialGateStatus as PricingTrialGateStatus : undefined,
+    trialBundleGateStatus: typeof record.trialBundleGateStatus === 'string'
+      ? record.trialBundleGateStatus as PricingTrialBundleGateStatus
+      : undefined,
     statusReasonText: typeof record.statusReasonText === 'string' && record.statusReasonText.trim()
       ? record.statusReasonText.trim()
       : buildStatusReasonText(status, typeof record.statusReasonCode === 'string' ? record.statusReasonCode : undefined),
@@ -549,7 +603,9 @@ export function normalizePackagingReviewSummaryView(value: unknown): PackagingRe
     subItems: subItems.length > 0 ? subItems : lineItems.slice(1),
     lineItems,
     missingDetails,
+    costSubtotal: normalizeOptionalNumber(record.costSubtotal),
     subtotal: normalizeOptionalNumber(record.subtotal),
+    quotedAmount: normalizeOptionalNumber(record.quotedAmount),
     shippingFee: normalizeOptionalNumber(record.shippingFee),
     finalPrice: normalizeOptionalNumber(record.finalPrice),
     totalUnitPrice: normalizeOptionalNumber(record.totalUnitPrice),

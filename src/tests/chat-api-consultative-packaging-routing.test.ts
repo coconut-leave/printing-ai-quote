@@ -10,7 +10,7 @@ interface TestResult {
 
 const results: TestResult[] = []
 
-function assert(condition: boolean, message: string) {
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message)
   }
@@ -37,7 +37,7 @@ async function initializeTestRuntime() {
     return
   }
 
-  const routeModule = await import('@/server/chat/createChatPostHandler')
+  const routeModule = await import('@/server/chat/createChatPostHandler') as Record<string, any>
   const routerModule = await import('@/server/ai/routeMessage')
 
   const createChatPostHandler = typeof routeModule.createChatPostHandler === 'function'
@@ -185,6 +185,46 @@ async function main() {
     assert(response.data?.normalizedParams?.productType === 'mailer_box', '应命中飞机盒报价链路')
   })
 
+  await test('显式克重标准内托单品在当前 trial gate 下可进入 quoted', async () => {
+    const response = await sendChat!({
+      message: '纸内托：20*12CM，500克白卡 + 3个专色 + 覆哑膜 + 裱 + 啤，5000',
+    })
+
+    assert(response.status === 'quoted', '显式克重标准内托单品应允许 quoted')
+    assert(response.data?.normalizedParams?.productType === 'box_insert', '应命中内托报价链路')
+    assert(response.packagingReview?.trialGateStatus === 'allowed_quoted_in_trial', '应暴露 allowed_quoted_in_trial')
+  })
+
+  await test('高频 proxy 内托单品在当前 trial gate 下可进入 quoted', async () => {
+    const response = await sendChat!({
+      message: '内托：20*12CM左右，WEB特种纸板，5000',
+    })
+
+    assert(response.status === 'quoted', '高频 proxy 内托单品应允许 quoted')
+    assert(response.data?.normalizedParams?.productType === 'box_insert', 'quoted 结果应继续保留内托 productType')
+    assert(response.packagingReview?.trialGateStatus === 'allowed_quoted_in_trial', '应暴露 allowed_quoted_in_trial')
+  })
+
+  await test('高频 generic 说明书单品在当前 trial gate 下可进入 quoted', async () => {
+    const response = await sendChat!({
+      message: '说明书：220x170mm，80g双胶纸，单面印，6100',
+    })
+
+    assert(response.status === 'quoted', '高频 generic 说明书单品应允许 quoted')
+    assert(response.data?.normalizedParams?.productType === 'leaflet_insert', '应命中说明书报价链路')
+    assert(response.packagingReview?.trialGateStatus === 'allowed_quoted_in_trial', '应暴露 allowed_quoted_in_trial')
+  })
+
+  await test('标准 glossy no-film window 单品在当前 trial gate 下可进入 quoted', async () => {
+    const response = await sendChat!({
+      message: '双插开窗盒：110x120x95mm，300克白卡，印黑色，过光胶，开窗不贴胶片，啤成品+粘盒，2000',
+    })
+
+    assert(response.status === 'quoted', '标准 glossy no-film window 单品应允许 quoted')
+    assert(response.data?.normalizedParams?.productType === 'window_box', '应命中 window_box 报价链路')
+    assert(response.packagingReview?.trialGateStatus === 'allowed_quoted_in_trial', '应暴露 allowed_quoted_in_trial')
+  })
+
   await test('文件型询价边界不受影响', async () => {
     const response = await sendChat!({
       message: '我有 PDF 设计稿，帮我看看并报价',
@@ -193,13 +233,131 @@ async function main() {
     assert(response.status === 'handoff_required', '文件型询价应继续 handoff')
   })
 
-  await test('双插盒 bundle 预估价链路不受咨询承接调整影响', async () => {
-    const response = await sendChat!({
+  await test('chat packaging routing 对两配件标准 bundle 放宽 quoted，并保持多配件 guardrail', async () => {
+    const quotedLeafletSticker = await sendChat!({
       message: '双插盒：7*5*5CM，350克白卡，正反四色，5000个；说明书：20*5CM，80克双铜纸，双面四色印，折3折，5000；透明贴纸：2.4*3cm，透明贴纸，5000',
     })
 
-    assert(response.status === 'estimated', 'bundle 预估价链路仍应保持 estimated')
-    assert(response.estimatedData?.isBundle === true, '应继续走 bundle 预估价链路')
+    assert(quotedLeafletSticker.status === 'quoted', '标准双插盒 + 标准说明书 + 标准贴纸 bundle 应允许 quoted')
+    assert(quotedLeafletSticker.data?.isBundle === true, 'quoted bundle 结果应保留 isBundle 标记')
+    assert(quotedLeafletSticker.packagingReview?.trialBundleGateStatus === 'standard_quoted_bundle_in_trial', '标准双插盒 + 标准说明书 + 标准贴纸应暴露标准 quoted bundle gate')
+
+    const quotedInsertLeaflet = await sendChat!({
+      message: '双插盒：7*5*5CM，350克白卡，正反四色+专色，5000个；纸内托：20*12CM，500克白卡 + 3个专色 + 覆哑膜 + 裱 + 啤，5000；说明书：20*5CM，80克双铜纸，双面四色印，折3折，5000',
+    })
+
+    assert(quotedInsertLeaflet.status === 'quoted', '标准双插盒 + 标准内托 + 标准说明书 bundle 应允许 quoted')
+    assert(quotedInsertLeaflet.packagingReview?.trialBundleGateStatus === 'standard_quoted_bundle_in_trial', '标准双插盒 + 标准内托 + 标准说明书应暴露标准 quoted bundle gate')
+
+    const quotedInsertSticker = await sendChat!({
+      message: '双插盒：7*5*5CM，350克白卡，正反四色+专色，5000个；纸内托：20*12CM，500克白卡 + 3个专色 + 覆哑膜 + 裱 + 啤，5000；透明贴纸：2.4*3cm，透明贴纸，5000',
+    })
+
+    assert(quotedInsertSticker.status === 'quoted', '标准双插盒 + 标准内托 + 标准贴纸 bundle 应允许 quoted')
+    assert(quotedInsertSticker.packagingReview?.trialBundleGateStatus === 'standard_quoted_bundle_in_trial', '标准双插盒 + 标准内托 + 标准贴纸应暴露标准 quoted bundle gate')
+
+    const quotedLeafletCarton = await sendChat!({
+      message: '双插盒：7*5*5CM，350克白卡，正反四色，5000个；说明书：20*5CM，80克双铜纸，双面四色印，折3折，5000；纸箱+包装费：42*42*35CM，5000套',
+    })
+
+    assert(quotedLeafletCarton.status === 'quoted', '标准双插盒 + 标准说明书 + simple carton bundle 应允许 quoted')
+    assert(quotedLeafletCarton.packagingReview?.trialBundleGateStatus === 'standard_quoted_bundle_in_trial', '标准双插盒 + 标准说明书 + simple carton 应暴露标准 quoted bundle gate')
+
+    const quotedMailerLeafletSticker = await sendChat!({
+      message: '飞机盒：20*12*6CM，300克白卡，四色印刷，5000个；说明书：20*5CM，80克双铜纸，双面四色印，折3折，5000；透明贴纸：2.4*3cm，透明贴纸，5000',
+    })
+
+    assert(quotedMailerLeafletSticker.status === 'quoted', '已验证飞机盒 + 标准说明书 + 标准贴纸 bundle 应允许 quoted')
+    assert(quotedMailerLeafletSticker.packagingReview?.trialBundleGateStatus === 'standard_quoted_bundle_in_trial', '已验证飞机盒 + 标准说明书 + 标准贴纸应暴露标准 quoted bundle gate')
+
+    const estimatedFullBundle = await sendChat!({
+      message: '双插盒：7*5*5CM，350克白卡，正反四色，5000个；说明书：20*5CM，80克双铜纸，双面四色印，折3折，5000；透明贴纸：2.4*3cm，透明贴纸，5000；纸箱+包装费：42*42*35CM，5000套',
+    })
+
+    assert(estimatedFullBundle.status === 'estimated', '更宽的三配件 bundle 应继续 estimated')
+    assert(estimatedFullBundle.estimatedData?.isBundle === true, 'estimated bundle 结果应保留 isBundle 标记')
+    assert(estimatedFullBundle.packagingReview?.trialBundleGateStatus === 'estimated_only_bundle_in_trial', '更宽的三配件 bundle 应暴露 estimated-only bundle gate')
+
+    const estimatedGenericLeafletSticker = await sendChat!({
+      message: '双插盒：7*5*5CM，350克白卡，正反四色，5000个；说明书：220x170mm，80g双胶纸，单面印，5000；透明贴纸：2.4*3cm，透明贴纸，5000',
+    })
+
+    assert(estimatedGenericLeafletSticker.status === 'estimated', 'generic leaflet 参与的多配件 bundle 应继续 estimated')
+    assert(estimatedGenericLeafletSticker.packagingReview?.trialBundleGateStatus === 'estimated_only_bundle_in_trial', 'generic leaflet 参与的多配件 bundle 应暴露 estimated-only bundle gate')
+
+    const estimatedProxyInsertLeaflet = await sendChat!({
+      message: '双插盒：7*5*5CM，350克白卡，正反四色，5000个；内托：20*12CM左右，WEB特种纸板，5000；说明书：20*5CM，80克双铜纸，双面四色印，折3折，5000',
+    })
+
+    assert(estimatedProxyInsertLeaflet.status === 'estimated', 'proxy 内托参与的多配件 bundle 应继续 estimated')
+    assert(estimatedProxyInsertLeaflet.packagingReview?.trialBundleGateStatus === 'estimated_only_bundle_in_trial', 'proxy 内托参与的多配件 bundle 应暴露 estimated-only bundle gate')
+  })
+
+  await test('双插盒 + 标准说明书 bundle 可进入 quoted', async () => {
+    const response = await sendChat!({
+      message: '双插盒：7*5*5CM，350克白卡，正反四色，5000个；说明书：20*5CM，80克双铜纸，双面四色印，折3折，5000',
+    })
+
+    assert(response.status === 'quoted', '标准主件 + 标准说明书 bundle 应允许 quoted')
+    assert(response.data?.isBundle === true, 'quoted bundle 结果应保留 isBundle 标记')
+    assert(response.packagingReview?.statusReasonText.includes('标准主盒 + 标准说明书'), '应返回中文 trial gate 说明')
+  })
+
+  await test('双插盒 + 标准贴纸 bundle 可进入 quoted', async () => {
+    const response = await sendChat!({
+      message: '双插盒：7*5*5CM，350克白卡，正反四色，5000个；透明贴纸：2.4*3cm，透明贴纸，5000',
+    })
+
+    assert(response.status === 'quoted', '标准主件 + 标准贴纸 bundle 应允许 quoted')
+    assert(response.data?.isBundle === true, 'quoted bundle 结果应保留 isBundle 标记')
+    assert(response.packagingReview?.trialBundleGateStatus === 'standard_quoted_bundle_in_trial', '应暴露标准 quoted bundle gate')
+  })
+
+  await test('双插盒 + simple carton bundle 在当前 trial gate 下可进入 quoted', async () => {
+    const response = await sendChat!({
+      message: '双插盒：7*5*5CM，350克白卡，正反四色，5000个；纸箱+包装费：42*42*35CM，5000套',
+    })
+
+    assert(response.status === 'quoted', '主件 + simple carton 应允许 quoted')
+    assert(response.data?.isBundle === true, 'quoted bundle 结果应保留 isBundle 标记')
+    assert(response.packagingReview?.trialBundleGateStatus === 'standard_quoted_bundle_in_trial', '主件 + simple carton 应暴露标准 quoted bundle gate')
+  })
+
+  await test('双插盒 + 标准内托 bundle 在当前 trial gate 下可进入 quoted', async () => {
+    const response = await sendChat!({
+      message: '双插盒：7*5*5CM，350克白卡，正反四色+专色，5000个；纸内托：20*12CM，500克白卡 + 3个专色 + 覆哑膜 + 裱 + 啤，5000',
+    })
+
+    assert(response.status === 'quoted', '标准双插盒 + 标准内托 bundle 应允许 quoted')
+    assert(response.data?.isBundle === true, 'quoted bundle 结果应保留 isBundle 标记')
+    assert(response.packagingReview?.trialBundleGateStatus === 'standard_quoted_bundle_in_trial', '标准双插盒 + 标准内托应暴露标准 quoted bundle gate')
+  })
+
+  await test('双插盒 + 高频 proxy 内托 bundle 在当前 trial gate 下可进入 quoted', async () => {
+    const response = await sendChat!({
+      message: '双插盒：7*5*5CM，350克白卡，正反四色，5000个；内托：20*12CM左右，WEB特种纸板，5000',
+    })
+
+    assert(response.status === 'quoted', '双插盒 + 高频 proxy 内托 bundle 应允许 quoted')
+    assert(response.packagingReview?.trialBundleGateStatus === 'standard_quoted_bundle_in_trial', '双插盒 + 高频 proxy 内托应暴露标准 quoted bundle gate')
+  })
+
+  await test('双插盒 + 高频 generic 说明书 bundle 在当前 trial gate 下应保持 estimated', async () => {
+    const response = await sendChat!({
+      message: '双插盒：7*5*5CM，350克白卡，正反四色，5000个；说明书：220x170mm，80g双胶纸，单面印，5000',
+    })
+
+    assert(response.status === 'estimated', '双插盒 + 高频 generic 说明书 bundle 应继续保持 estimated')
+    assert(response.packagingReview?.trialBundleGateStatus === 'estimated_only_bundle_in_trial', '双插盒 + 高频 generic 说明书应暴露 estimated-only bundle gate')
+  })
+
+  await test('双插盒 + handoff-only 内托 bundle 在当前 trial gate 下应继续 handoff', async () => {
+    const response = await sendChat!({
+      message: '双插盒：7*5*5CM，350克白卡，正反四色，5000个；内托：20*12CM，EVA内托，5000',
+    })
+
+    assert(response.status === 'handoff_required', '双插盒 + handoff-only 内托 bundle 应继续 handoff')
+    assert(response.packagingReview?.trialBundleGateStatus === 'handoff_only_bundle_in_trial', '双插盒 + handoff-only 内托应继续暴露 handoff bundle gate')
   })
 
   await test('明确产品类型但缺关键字段的双插盒仍应 missing_fields，不被新兜底误伤', async () => {

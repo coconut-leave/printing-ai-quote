@@ -5,6 +5,7 @@ import {
   buildLedgerWorkbook,
   type ExportableQuoteSnapshot,
   getLatestExportableQuoteSnapshot,
+  isDeliverableQuoteSnapshot,
 } from '@/server/export/quoteExcel'
 import {
   buildConversationUpdatedAtWhere,
@@ -43,7 +44,8 @@ export async function GET(request: Request) {
 
     const snapshots = conversations
       .map((conversation) => getLatestExportableQuoteSnapshot(conversation))
-      .filter((snapshot): snapshot is ExportableQuoteSnapshot => Boolean(snapshot))
+      .filter((snapshot): snapshot is ExportableQuoteSnapshot => snapshot !== null)
+      .filter((snapshot) => isDeliverableQuoteSnapshot(snapshot))
 
     if (snapshots.length === 0) {
       return NextResponse.json({

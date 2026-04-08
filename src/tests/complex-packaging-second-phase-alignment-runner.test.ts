@@ -12,7 +12,7 @@ interface TestResult {
 
 const results: TestResult[] = []
 
-function assert(condition: boolean, message: string) {
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message)
   }
@@ -75,12 +75,15 @@ test('runner 能正确比较 phase-one 与 second-phase 的主类归并', () => 
           parseWarnings: [],
           usedForResponse: false,
           diffSummary: {
+            familyMergeAligned: false,
             packagingTypeAligned: false,
             statusAligned: true,
             phaseOneProductType: 'window_box',
             secondPhasePackagingType: 'folding_carton',
             phaseOneStatus: 'quoted',
             secondPhaseStatus: 'quoted',
+            manualAdjustmentPresent: false,
+            enteredDeferredOrHandoff: false,
             keyUnresolvedTerms: [],
           },
         },

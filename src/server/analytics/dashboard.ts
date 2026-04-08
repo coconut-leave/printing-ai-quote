@@ -230,6 +230,8 @@ function sortProductTypes<T extends { productType: string }>(rows: T[]): T[] {
     'leaflet_insert',
     'box_insert',
     'seal_sticker',
+    'foil_bag',
+    'carton_packaging',
     'album',
     'flyer',
     'business_card',

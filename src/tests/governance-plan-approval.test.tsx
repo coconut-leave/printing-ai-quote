@@ -32,7 +32,7 @@ interface TestResult {
 
 const results: TestResult[] = []
 
-function assert(condition: boolean, message: string) {
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message)
   }
@@ -63,7 +63,7 @@ function setFileHint(reflectionId: number, createdAt: Date, fileHint: string) {
   setImprovementTargetFileHint(generateImprovementId(reflectionId, createdAt), fileHint)
 }
 
-function pickItemsByTheme(theme: string, count: number, items: Array<{ id: string; createdAt: string; governanceTheme: string }>) {
+function pickItemsByTheme<T extends { id: string; createdAt: string; governanceTheme: string }>(theme: string, count: number, items: T[]) {
   const selected = items
     .filter((item) => item.governanceTheme === theme)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
@@ -1047,9 +1047,12 @@ async function main() {
         onSaveBatchNote={() => {}}
         getPlanDecisionNote={() => ''}
         getPlanTargetCampaignId={() => ''}
+        getPlanAssignmentActorId={() => ''}
         onPlanDecisionNoteChange={() => {}}
         onPlanTargetCampaignIdChange={() => {}}
         onPlanDecision={() => {}}
+        onPlanAssignmentActorIdChange={() => {}}
+        onPlanAssign={() => {}}
       />
     )
 

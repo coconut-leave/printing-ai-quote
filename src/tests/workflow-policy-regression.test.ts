@@ -52,13 +52,15 @@ console.log('\n=== 统一报价策略四路径回归测试 ===\n')
 test('规则快照: 活跃自动报价范围必须只包含一期复杂包装品类', () => {
   const snapshot = getWorkflowRulesSnapshot()
   const productTypes = snapshot.map((item) => item.productType)
-  assert(snapshot.length === 6, '应只包含 6 个当前活跃自动报价品类规则')
+  assert(snapshot.length === 8, '应只包含 8 个当前活跃自动报价品类规则')
   assert(productTypes.includes('mailer_box'), '应包含 mailer_box 规则')
   assert(productTypes.includes('tuck_end_box'), '应包含 tuck_end_box 规则')
   assert(productTypes.includes('window_box'), '应包含 window_box 规则')
   assert(productTypes.includes('leaflet_insert'), '应包含 leaflet_insert 规则')
   assert(productTypes.includes('box_insert'), '应包含 box_insert 规则')
   assert(productTypes.includes('seal_sticker'), '应包含 seal_sticker 规则')
+  assert(productTypes.includes('foil_bag'), '应包含 foil_bag 规则')
+  assert(productTypes.includes('carton_packaging'), '应包含 carton_packaging 规则')
 })
 
 test('quoted: 支持的一期复杂包装参数齐全应进入 quoted', () => {

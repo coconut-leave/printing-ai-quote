@@ -34,6 +34,8 @@ function formatProductType(productType?: string): string {
     leaflet_insert: '说明书',
     box_insert: '内托',
     seal_sticker: '封口贴',
+    foil_bag: '铝箔袋',
+    carton_packaging: '纸箱包装',
   }
   return map[productType || ''] || '这类印品'
 }
@@ -141,6 +143,10 @@ function buildSpecificPackagingConsultationReply(productType: string): string {
       return `如果您现在是在问内托，常见会先看是固定产品、抗震还是做组合分隔，再定材质和结构。价格主要还是看尺寸、材质、结构复杂度和数量，您把装什么产品和大概尺寸发我，我再按内托方向帮您细化。`
     case 'seal_sticker':
       return `如果您现在是在问封口贴，常见会先看是做防拆、封口还是品牌展示，再定材质、尺寸和印刷内容。您把贴在哪里、尺寸大概多大、数量多少告诉我，我就能按封口贴方向继续帮您收。`
+    case 'foil_bag':
+      return `如果您现在是在问铝箔袋，常见会先确认袋型尺寸、袋材厚度是不是空白袋，以及数量大概多少。像空白铝箔袋这类可以先按常见模板起步；如果涉及定制印刷、拉链、自立嘴或特殊复合结构，就要更保守一些。您把袋子尺寸、数量和大概材质发我，我就能按铝箔袋方向继续帮您收。`
+    case 'carton_packaging':
+      return `如果您现在是在问纸箱包装，常见会先分是单纯外箱/纸箱+包装费，还是还带印刷、刀模和成型要求。价格通常先看纸箱尺寸、数量、是否空白箱，再看有没有包装费或印刷要求。您把外箱长宽高、数量和是不是空白箱发我，我就能按纸箱包装方向继续帮您收。`
     default:
       return '这类包装我可以先按常见做法帮您理方向，再根据尺寸、数量、材质和工艺往下细化。'
   }
@@ -173,6 +179,8 @@ function inferPackagingConsultationProductType(message: string): string | undefi
   if (includesAny(message, ['说明书', '折页'])) return 'leaflet_insert'
   if (includesAny(message, ['内托'])) return 'box_insert'
   if (includesAny(message, ['封口贴', '透明贴纸', '贴纸'])) return 'seal_sticker'
+  if (includesAny(message, ['铝箔袋', '铝铂袋'])) return 'foil_bag'
+  if (includesAny(message, ['纸箱+包装费', '大外箱', '外箱', '空白箱'])) return 'carton_packaging'
   if (includesAny(message, ['快递', '运输', '发货', '抗压'])) return 'mailer_box'
   if (includesAny(message, ['零售', '上架', '货架', '彩盒'])) return 'tuck_end_box'
   if (includesAny(message, ['展示', '露出', '看得到', '开窗', '陈列'])) return 'window_box'
